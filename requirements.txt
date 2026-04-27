@@ -1,0 +1,7 @@
+numpy
+pandas
+matplotlib
+tabulate
+scipy
+sympy
+python3-tk
