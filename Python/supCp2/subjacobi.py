@@ -33,7 +33,7 @@ def _compute_once(A_local, b_local, x0_local, tol, max_it, err_type):
         x_prev = x.copy()
         x = np.dot(np.linalg.inv(D), -np.dot(R, x_prev)) + np.dot(np.linalg.inv(D), b_n)
         abs_err = np.linalg.norm(x - x_prev)
-        rel_err = abs_err / np.linalg.norm(x) if np.linalg.norm(x) != 0 else float('inf')
+        rel_err = abs_err / np.linalg.norm(x_prev) if np.linalg.norm(x_prev) != 0 else float('inf')
         rows.append([k, x.copy().tolist(), float(abs_err), float(rel_err)])
         err = rel_err if err_type == 'rel' else abs_err
         if err < tol:

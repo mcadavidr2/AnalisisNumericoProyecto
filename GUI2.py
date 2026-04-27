@@ -1126,7 +1126,7 @@ class App(tk.Tk):
         self.compare_error_types_var = tk.BooleanVar(value=False)
 
         # NUEVO: tipo de error seleccionado por el usuario
-        error_type_var = tk.StringVar(value='rel')  # 'rel', 'abs' o 'cond'
+        error_type_var = tk.StringVar(value='rel')  # 'abs' , 'rel', 'rel2', 'rel3', 'rel4'  
 
         opts_frame = tk.Frame(main_frame, bg='#f0f0f0')
         opts_frame.pack(fill='x', pady=(0, 10))
@@ -1160,7 +1160,7 @@ class App(tk.Tk):
         error_combo = ttk.Combobox(
             opts_frame,
             textvariable=error_type_var,
-            values=['rel', 'abs', 'cond'],  # relativo, absoluto, condición
+            values=['abs', 'rel', 'rel2', 'rel3', 'rel4'],  # relativo, absoluto
             width=8,
             state='readonly'
         )
@@ -1269,6 +1269,10 @@ class App(tk.Tk):
                     # NUEVO: pasar tipo de error si el método lo permite
                     if 'error_type' in f_sig.parameters:
                         kwargs['error_type'] = error_type_var.get()
+
+                    if method_name == 'SOR' and 'w' in f_sig.parameters:
+                        pass
+                    
                 except Exception:
                     pass
 
@@ -1421,7 +1425,7 @@ class App(tk.Tk):
 
         if header_text:
             info_text = scrolledtext.ScrolledText(parent_frame, height=4, width=80,
-                                                  font=("Courier", 10), bg='#ecf0f1')
+                                                font=("Courier", 10), bg='#ecf0f1')
             info_text.pack(fill='x', padx=10, pady=(10, 5))
             info_text.insert('1.0', header_text)
             info_text.config(state='disabled')
@@ -1429,7 +1433,7 @@ class App(tk.Tk):
         table_frame = tk.Frame(parent_frame, bg='white')
         table_frame.pack(fill='both', expand=True, padx=10, pady=5)
 
-        custom_headers = False  # <- para saber si usamos texto tal cual o el .title()
+        custom_headers = False
 
         if isinstance(table_data, dict):
             columns = ["Propiedad", "Valor"]
@@ -1441,41 +1445,40 @@ class App(tk.Tk):
 
         elif isinstance(table_data, list) and len(table_data) > 0 and isinstance(table_data[0], list):
             n_cols = len(table_data[0])
-
-            # === CABECERAS PERSONALIZADAS POR MÉTODO ===
-            if method_name == "Bisección" and n_cols == 8:
+            first_row = table_data[0]
+            
+            # 🔴 DETECCIÓN de tablas de sistemas lineales (Jacobi, Gauss-Seidel, SOR)
+            # Con 6 columnas: Iter, Sol, Error_abs, Error_rel, Error_parada, Tipo
+            is_linear_system = (n_cols >= 5 and len(table_data) > 0 and isinstance(first_row[1], list))
+            
+            if is_linear_system and n_cols >= 6:
+                columns = ["Iteración", "Solución (x₁, x₂, ...)", "Error absoluto (L∞)", 
+                        "Error relativo (L∞)", "Error de parada", "Tipo error"]
+                custom_headers = True
+            elif is_linear_system and n_cols == 4:
+                columns = ["Iteración", "Solución (x₁, x₂, ...)", "Error absoluto (L∞)", "Error relativo (L∞)"]
+                custom_headers = True
+            elif method_name == "Bisección" and n_cols == 8:
                 columns = ["Iteración", "a", "f(a)", "pm", "f(pm)", "b", "f(b)", "Error Abs."]
                 custom_headers = True
-
             elif method_name == "Regla Falsa" and n_cols == 8:
-                # [Iter, A, F(A), B, F(B), Xr, F(Xr), Error]
                 columns = ["Iteración", "a", "f(a)", "b", "f(b)", "xr", "f(xr)", "Error"]
                 custom_headers = True
-
             elif method_name == "Newton" and n_cols == 5:
-                # [Iter, x, f(x), f'(x), Error]
                 columns = ["Iteración", "x_n", "f(x_n)", "f'(x_n)", "Error"]
                 custom_headers = True
-
             elif method_name == "Secante" and n_cols == 5:
-                # [Iter, x_{i-1}, x_i, f(x_i), Error]
                 columns = ["Iteración", "x_{n-1}", "x_n", "f(x_n)", "Error"]
                 custom_headers = True
-
             elif method_name == "Punto Fijo" and n_cols == 4:
-                # [Iter, x, g(x), Error]
                 columns = ["Iteración", "x_n", "g(x_n)", "Error"]
                 custom_headers = True
-
             elif method_name == "Raíces Múltiples" and n_cols == 6:
-                # [Iter, x, f(x), f'(x), f''(x), Error]
                 columns = ["Iteración", "x_n", "f(x_n)", "f'(x_n)", "f''(x_n)", "Error"]
                 custom_headers = True
-
             else:
-                # Caso genérico
                 columns = [f"Col_{i+1}" for i in range(n_cols)]
-
+            
             rows_iter = table_data
 
         else:
@@ -1486,7 +1489,7 @@ class App(tk.Tk):
 
         for col in columns:
             if custom_headers:
-                heading_text = col          # usamos el texto tal cual lo definimos arriba
+                heading_text = col
             else:
                 heading_text = col.replace('_', ' ').title()
             tree.heading(col, text=heading_text)
@@ -1496,7 +1499,19 @@ class App(tk.Tk):
             if isinstance(row, dict):
                 values = [str(row.get(col, '')) for col in columns]
             elif isinstance(row, (list, tuple)):
-                values = [str(val) for val in row]
+                formatted_row = []
+                for idx, val in enumerate(row):
+                    if isinstance(val, list):
+                        formatted_list = [f"{x:.6f}" if isinstance(x, (int, float)) else str(x) for x in val]
+                        formatted_row.append(f"[{', '.join(formatted_list)}]")
+                    elif isinstance(val, float):
+                        if idx >= 2 and idx <= 4:
+                            formatted_row.append(f"{val:.2e}" if abs(val) < 0.001 else f"{val:.8f}")
+                        else:
+                            formatted_row.append(f"{val:.6f}")
+                    else:
+                        formatted_row.append(str(val))
+                values = formatted_row
             else:
                 values = [str(row)]
             tree.insert('', 'end', values=values)
@@ -1517,13 +1532,13 @@ class App(tk.Tk):
 
         if isinstance(table_data, dict):
             tk.Label(summary_frame, text=f"Propiedades: {len(table_data)}",
-                     font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
+                    font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
         elif isinstance(table_data, list):
             tk.Label(summary_frame, text=f"Filas: {len(table_data)}",
-                     font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
+                    font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
         else:
             tk.Label(summary_frame, text="Resultado",
-                     font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
+                    font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
 
         poly_keys = ['polinomio_str', 'polinomios_por_tramo', 'polinomios_base']
         has_poly = False
@@ -1545,8 +1560,8 @@ class App(tk.Tk):
             btn_frame = tk.Frame(parent_frame, bg='#f0f0f0')
             btn_frame.pack(fill='x', padx=10, pady=(0, 10))
             tk.Button(btn_frame, text="Ver polinomio(s) completos", font=("Arial", 10, "bold"),
-                      bg='#8e44ad', fg='white', padx=10, pady=4, cursor='hand2',
-                      command=lambda txt=poly_text: self.show_polynomials_modal(txt)).pack(side='right')
+                    bg='#8e44ad', fg='white', padx=10, pady=4, cursor='hand2',
+                    command=lambda txt=poly_text: self.show_polynomials_modal(txt)).pack(side='right')
             
     def show_polynomials_modal(self, pol_text):
         modal = tk.Toplevel(self)
@@ -1680,6 +1695,9 @@ class App(tk.Tk):
         for method_name in ROOT_METHODS:
             if method_name == current_method:
                 continue  # ya lo ejecutó el usuario
+            
+            if 'error_type' in sig.parameters:
+                kwargs['error_type'] = error_type
 
             method_info = METHODS[method_name]["module"]
             package = METHODS[method_name].get("package", "")
