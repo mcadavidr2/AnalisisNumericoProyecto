@@ -1,34 +1,26 @@
 """
-spline_cubico.py
-----------------
-Interpolación por spline (trazador) cúbico natural.
+spline_cuadratico.py
+--------------------
+Interpolación por spline (trazador) cuadrático.
 
-Para n+1 puntos (x_i, y_i), se construyen n polinomios cúbicos
-    S_i(x) = a_i·x³ + b_i·x² + c_i·x + d_i
-uno por cada tramo [x_i, x_{i+1}], con las siguientes condiciones:
+Para n+1 puntos (x_i, y_i) con i=0,...,n, se construyen n polinomios
+cuadráticos
+    S_i(x) = a_i·x² + b_i·x + c_i
+uno por cada tramo [x_i, x_{i+1}], con las siguientes condiciones
+(página 23 del PDF del profe):
 
-  1. Cada S_i pasa por sus dos extremos: S_i(x_i)=y_i, S_i(x_{i+1})=y_{i+1}
-  2. Continuidad de S' en los nodos internos
-  3. Continuidad de S'' en los nodos internos
-  4. Condición natural: S''(x_0) = S''(x_n) = 0
+  1. Cada S_i pasa por sus dos extremos:
+       S_i(x_i)=y_i,  S_i(x_{i+1})=y_{i+1}
+  2. Continuidad de S' en los nodos internos:
+       S'_i(x_i) = S'_{i-1}(x_i)
+  3. Condición de borde: S''_0(x_0) = 0
+     Esto equivale a 2·a_0 = 0, es decir, el primer tramo se degenera
+     a lineal. Es la convención del MATLAB del profe (Spline.m).
 
-Esto da un sistema lineal de 4n ecuaciones con 4n incógnitas que se
-resuelve por np.linalg.solve. Replica la función Spline.m del profe.
+Total: n + n + (n-1) + 1 = 3n ecuaciones con 3n incógnitas (donde
+n es el número de tramos = puntos - 1).
 
-Cambios respecto a la versión anterior:
-
-1. Implementación PROPIA del sistema lineal (en lugar de scipy.CubicSpline).
-   Esto soluciona el bug de coeficientes invertidos al imprimir.
-
-2. Coeficientes ahora en orden DESCENDENTE: [a, b, c, d] donde a es el
-   cúbico, d la constante. Coherente con como los enseña el profe y como
-   los muestra MATLAB con su Tabla.
-
-3. Validaciones delegadas en _validar_y_ordenar.
-
-4. Validación nueva: mínimo 3 puntos (cúbico natural requiere ≥3).
-
-5. Eliminada la rama del input() y el código muerto.
+Se resuelve por np.linalg.solve replicando Spline.m caso d=2.
 """
 
 import numpy as np
@@ -39,130 +31,102 @@ from Python.Vandermonde import _validar_y_ordenar
 from Python.supCp3 import SUBinterpol_lagrange
 from Python.supCp3 import SUBinterpol_newton
 from Python.supCp3 import SUBspline_lineal
+from Python.supCp3 import SUBspln_cubico
 from Python.supCp3 import Subvandermonde
 
 
-def _resolver_spline_cubico(x, y):
-    """Monta y resuelve el sistema 4n×4n del spline cúbico natural.
+def _resolver_spline_cuadratico(x, y):
+    """Monta y resuelve el sistema 3n×3n del spline cuadrático.
 
-    Replica Spline.m del profe (caso d=3). El vector solución tiene
+    Replica Spline.m del profe (caso d=2). El vector solución tiene
     los coeficientes ordenados como:
-        [a_1, b_1, c_1, d_1, a_2, b_2, c_2, d_2, ..., a_n, b_n, c_n, d_n]
-    donde cada tramo es S_i(x) = a_i·x³ + b_i·x² + c_i·x + d_i.
+        [a_0, b_0, c_0, a_1, b_1, c_1, ..., a_{n-1}, b_{n-1}, c_{n-1}]
+    donde cada tramo es S_i(x) = a_i·x² + b_i·x + c_i, con
+    a_0 = 0 por la condición S''_0(x_0) = 0.
 
-    Retorna una matriz Tabla de tamaño (n, 4): cada fila son los 4
-    coeficientes [a_i, b_i, c_i, d_i] de un tramo, en orden descendente
+    Retorna una matriz Tabla de tamaño (n, 3): cada fila son los 3
+    coeficientes [a_i, b_i, c_i] de un tramo, en orden descendente
     de potencias.
     """
     n = len(x) - 1  # número de tramos
     cua = x ** 2
-    cub = x ** 3
 
-    A = np.zeros((4 * n, 4 * n))
-    b_vec = np.zeros(4 * n)
+    A = np.zeros((3 * n, 3 * n))
+    b_vec = np.zeros(3 * n)
 
     # --- Bloque 1: cada tramo pasa por su punto izquierdo ---
     # S_i(x_i) = y_i, para i = 0, 1, ..., n-1
     h = 0
     c = 0
     for i in range(n):
-        A[h, c]     = cub[i]
-        A[h, c + 1] = cua[i]
-        A[h, c + 2] = x[i]
-        A[h, c + 3] = 1.0
+        A[h, c]     = cua[i]
+        A[h, c + 1] = x[i]
+        A[h, c + 2] = 1.0
         b_vec[h] = y[i]
-        c += 4
+        c += 3
         h += 1
 
     # --- Bloque 2: cada tramo pasa por su punto derecho ---
     # S_i(x_{i+1}) = y_{i+1}, para i = 0, 1, ..., n-1
     c = 0
     for i in range(n):
-        A[h, c]     = cub[i + 1]
-        A[h, c + 1] = cua[i + 1]
-        A[h, c + 2] = x[i + 1]
-        A[h, c + 3] = 1.0
+        A[h, c]     = cua[i + 1]
+        A[h, c + 1] = x[i + 1]
+        A[h, c + 2] = 1.0
         b_vec[h] = y[i + 1]
-        c += 4
+        c += 3
         h += 1
 
     # --- Bloque 3: continuidad de la primera derivada en nodos internos ---
-    # S'_i(x_{i+1}) = S'_{i+1}(x_{i+1}), para i = 0, 1, ..., n-2
-    # Es decir: 3·a_i·x² + 2·b_i·x + c_i - 3·a_{i+1}·x² - 2·b_{i+1}·x - c_{i+1} = 0
+    # S'_i(x_{i+1}) = S'_{i+1}(x_{i+1}), para i = 0, ..., n-2
+    # Es decir: 2·a_i·x + b_i - 2·a_{i+1}·x - b_{i+1} = 0
     c = 0
     for i in range(1, n):
         # Nodo interno x[i], que conecta tramos (i-1) e (i)
-        A[h, c]     = 3 * cua[i]
-        A[h, c + 1] = 2 * x[i]
-        A[h, c + 2] = 1.0
-        A[h, c + 4] = -3 * cua[i]
-        A[h, c + 5] = -2 * x[i]
-        A[h, c + 6] = -1.0
+        A[h, c]     = 2 * x[i]
+        A[h, c + 1] = 1.0
+        A[h, c + 3] = -2 * x[i]
+        A[h, c + 4] = -1.0
         b_vec[h] = 0.0
-        c += 4
+        c += 3
         h += 1
 
-    # --- Bloque 4: continuidad de la segunda derivada en nodos internos ---
-    # S''_i(x_{i+1}) = S''_{i+1}(x_{i+1})
-    # Es decir: 6·a_i·x + 2·b_i - 6·a_{i+1}·x - 2·b_{i+1} = 0
-    c = 0
-    for i in range(1, n):
-        A[h, c]     = 6 * x[i]
-        A[h, c + 1] = 2.0
-        A[h, c + 4] = -6 * x[i]
-        A[h, c + 5] = -2.0
-        b_vec[h] = 0.0
-        c += 4
-        h += 1
-
-    # --- Bloque 5: condiciones naturales en los extremos ---
-    # S''(x_0) = 0 y S''(x_n) = 0
-    # Es decir: 6·a_1·x_0 + 2·b_1 = 0,  y  6·a_n·x_n + 2·b_n = 0
-    A[h, 0] = 6 * x[0]
-    A[h, 1] = 2.0
-    b_vec[h] = 0.0
-    h += 1
-
-    A[h, c]     = 6 * x[-1]
-    A[h, c + 1] = 2.0
+    # --- Bloque 4: condición de borde S''_0(x_0) = 0 ---
+    # Como S'' = 2a, esto es 2·a_0 = 0.
+    A[h, 0] = 2.0
     b_vec[h] = 0.0
 
     # Resolver el sistema
     val = np.linalg.solve(A, b_vec)
 
-    # Reshape a (n, 4): cada fila son los 4 coeficientes de un tramo
-    Tabla = val.reshape(n, 4)
+    # Reshape a (n, 3): cada fila son los 3 coeficientes de un tramo
+    Tabla = val.reshape(n, 3)
     return Tabla
 
 
-def _evaluar_spline(Tabla, x_nodos, x_eval):
-    """Evalúa el spline en los puntos x_eval. Cada x_eval cae en el
-    tramo correspondiente y se evalúa con los coeficientes de ese tramo.
-
-    Tabla: matriz (n, 4) con coeficientes [a, b, c, d] orden descendente.
-    """
+def _evaluar_spline_cuadratico(Tabla, x_nodos, x_eval):
+    """Evalúa el spline cuadrático en los puntos x_eval."""
     n_tramos = Tabla.shape[0]
     y_eval = np.zeros_like(x_eval, dtype=float)
 
     for k, xv in enumerate(x_eval):
-        # Encontrar el tramo donde cae xv. Por defecto el último.
-        # Si xv está exactamente en un nodo, lo asignamos al tramo de la izquierda.
+        # Encontrar el tramo donde cae xv
         tramo = n_tramos - 1
         for i in range(n_tramos):
             if xv <= x_nodos[i + 1]:
                 tramo = i
                 break
 
-        a, b, c, d = Tabla[tramo]
-        y_eval[k] = a * xv**3 + b * xv**2 + c * xv + d
+        a, b, c = Tabla[tramo]
+        y_eval[k] = a * xv**2 + b * xv + c
 
     return y_eval
 
 
-def _formatear_polinomio_tramo(a, b, c, d, var="x", precision=4):
-    """Formatea un polinomio cúbico a·x³+b·x²+c·x+d como string."""
-    coef = [a, b, c, d]
-    grados = [3, 2, 1, 0]
+def _formatear_polinomio_cuadratico(a, b, c, var="x", precision=4):
+    """Formatea un polinomio cuadrático a·x²+b·x+c como string."""
+    coef = [a, b, c]
+    grados = [2, 1, 0]
     partes = []
 
     for valor, grado in zip(coef, grados):
@@ -186,10 +150,10 @@ def _formatear_polinomio_tramo(a, b, c, d, var="x", precision=4):
     return " ".join(partes)
 
 
-def spline_cubico(ValoresX=None, ValoresY=None,
-                   show_report=True, auto_compare=True):
+def spline_cuadratico(ValoresX=None, ValoresY=None,
+                       show_report=True, auto_compare=True):
     """
-    Interpolación por spline cúbico natural.
+    Interpolación por spline cuadrático.
 
     Devuelve (resultado_str, info_dict) compatible con la GUI.
     """
@@ -198,26 +162,26 @@ def spline_cubico(ValoresX=None, ValoresY=None,
     # --- Validación ---
     x, y, advertencias = _validar_y_ordenar(ValoresX, ValoresY)
 
-    # Validación específica del cúbico: necesita al menos 3 puntos
+    # Validación específica: cuadrático necesita al menos 3 puntos
     if len(x) < 3:
         raise ValueError(
-            "El spline cúbico requiere al menos 3 puntos para que el "
-            "sistema de ecuaciones sea consistente. Para 2 puntos use "
-            "spline lineal o interpolación de Newton."
+            "El spline cuadrático requiere al menos 3 puntos para que "
+            "el sistema de ecuaciones sea consistente. Para 2 puntos "
+            "use spline lineal o interpolación de Newton."
         )
 
     # --- Cálculo ---
     start_time = time.perf_counter()
-    Tabla = _resolver_spline_cubico(x, y)
+    Tabla = _resolver_spline_cuadratico(x, y)
     n_tramos = Tabla.shape[0]
 
     # Construir representación legible
     polinomios = []
     coeficientes_por_tramo = []
     for i in range(n_tramos):
-        a, b_, c, d = Tabla[i]
-        coeficientes_por_tramo.append((float(a), float(b_), float(c), float(d)))
-        poly_str = _formatear_polinomio_tramo(a, b_, c, d)
+        a, b_, c = Tabla[i]
+        coeficientes_por_tramo.append((float(a), float(b_), float(c)))
+        poly_str = _formatear_polinomio_cuadratico(a, b_, c)
         polinomio = (
             f"S_{i}(x) = {poly_str}\n"
             f"    para x ∈ [{x[i]:g}, {x[i+1]:g}]"
@@ -226,7 +190,7 @@ def spline_cubico(ValoresX=None, ValoresY=None,
 
     # Evaluación para gráfica
     x_plot = np.linspace(min(x), max(x), 500)
-    y_spline = _evaluar_spline(Tabla, x, x_plot)
+    y_spline = _evaluar_spline_cuadratico(Tabla, x, x_plot)
 
     end_time = time.perf_counter()
     tiempo_ejecucion = end_time - start_time
@@ -235,15 +199,16 @@ def spline_cubico(ValoresX=None, ValoresY=None,
     puntos_fmt = ", ".join(f"({xi:g}, {yi:g})" for xi, yi in zip(x, y))
     resultado = (
         f"Puntos ingresados (ordenados): {puntos_fmt}\n\n"
-        f"Número de tramos: {n_tramos}\n\n"
+        f"Número de tramos: {n_tramos}\n"
+        f"Condición de borde: S''(x_0) = 0  →  a_0 = 0  "
+        f"(primer tramo lineal)\n\n"
         f"Polinomios por tramo:\n\n" + "\n\n".join(polinomios) +
-        f"\n\nTabla de coeficientes (a·x³ + b·x² + c·x + d):\n"
+        f"\n\nTabla de coeficientes (a·x² + b·x + c):\n"
     )
-    # Tabla numérica de coeficientes
-    resultado += f"  {'Tramo':>5}  {'a':>12}  {'b':>12}  {'c':>12}  {'d':>12}\n"
+    resultado += f"  {'Tramo':>5}  {'a':>12}  {'b':>12}  {'c':>12}\n"
     for i in range(n_tramos):
-        a, b_, c, d = Tabla[i]
-        resultado += f"  {i:>5}  {a:>12.6f}  {b_:>12.6f}  {c:>12.6f}  {d:>12.6f}\n"
+        a, b_, c = Tabla[i]
+        resultado += f"  {i:>5}  {a:>12.6f}  {b_:>12.6f}  {c:>12.6f}\n"
     resultado += f"\nTiempo de ejecución: {tiempo_ejecucion:.6f} segundos"
 
     if advertencias:
@@ -271,9 +236,9 @@ def spline_cubico(ValoresX=None, ValoresY=None,
                 gridspec_kw={'width_ratios': [3, 2]}
             )
             ax_plot.plot(x, y, 'ro', label='Puntos dados', markersize=8)
-            ax_plot.plot(x_plot, y_spline, 'b-', label='Spline Cúbico Natural',
+            ax_plot.plot(x_plot, y_spline, 'b-', label='Spline Cuadrático',
                          linewidth=2)
-            ax_plot.set_title("Interpolación con Spline Cúbico Natural")
+            ax_plot.set_title("Interpolación con Spline Cuadrático")
             ax_plot.set_xlabel("x")
             ax_plot.set_ylabel("y")
             ax_plot.legend()
@@ -309,13 +274,14 @@ def spline_cubico(ValoresX=None, ValoresY=None,
     if auto_compare:
         try:
             eval_pts = np.linspace(min(x), max(x), max(100, int(eval_grid)))
-            y_ref = _evaluar_spline(Tabla, x, eval_pts)
+            y_ref = _evaluar_spline_cuadratico(Tabla, x, eval_pts)
 
             other_results = {}
             for name, fn in [
                 ("Lagrange", lambda: SUBinterpol_lagrange.interpol_lagrange(x, y)),
                 ("Newton", lambda: SUBinterpol_newton.interpol_newton(x, y)),
                 ("Spline_lineal", lambda: SUBspline_lineal.SUBSUBspline_lineal(x, y)),
+                ("Spline_cubico", lambda: SUBspln_cubico.SUBSUBspline_cubico(x, y)),
                 ("Vandermonde", lambda: Subvandermonde.interpol_vandermonde(x, y)),
             ]:
                 try:
@@ -350,23 +316,24 @@ def spline_cubico(ValoresX=None, ValoresY=None,
                     )
                     ax_plot2.plot(x, y, 'ro', label='Puntos dados')
                     ax_plot2.plot(eval_pts, y_ref, 'k-',
-                                  label='Spline cúbico (referencia)')
+                                  label='Spline cuadrático (referencia)')
                     colors = {'Lagrange': 'm--', 'Newton': 'c--',
-                              'Spline_lineal': 'g--', 'Vandermonde': 'b:'}
+                              'Spline_lineal': 'g--', 'Spline_cubico': 'y--',
+                              'Vandermonde': 'b:'}
                     for name, res in other_results.items():
                         ycmp = reeval_on_common(res)
                         if ycmp is not None:
                             ax_plot2.plot(eval_pts, ycmp,
                                           colors.get(name, '--'), label=name)
-                    ax_plot2.set_title('Comparación respecto a Spline cúbico')
+                    ax_plot2.set_title('Comparación respecto a Spline cuadrático')
                     ax_plot2.set_xlabel('x')
                     ax_plot2.set_ylabel('y')
                     ax_plot2.legend()
                     ax_plot2.grid()
 
                     rows = []
-                    for name in ['Lagrange', 'Newton',
-                                 'Spline_lineal', 'Vandermonde']:
+                    for name in ['Lagrange', 'Newton', 'Spline_lineal',
+                                 'Spline_cubico', 'Vandermonde']:
                         m = metrics.get(name, {})
                         max_err = m.get('max_err')
                         rmse = m.get('rmse')
@@ -395,10 +362,10 @@ def spline_cubico(ValoresX=None, ValoresY=None,
 
 
 if __name__ == "__main__":
-    # Ejemplo del profe en ejemnewt.m: x=[19, 25, 29, 33], y=[5.8, 2.1, -1.3, 9.2]
-    res, info = spline_cubico(
-        [19, 25, 29, 33],
-        [5.8, 2.1, -1.3, 9.2],
+    # Ejemplo del profe (mismo de ejemnewt.m, caso d=2)
+    res, info = spline_cuadratico(
+        [1, 2, 3, 4],
+        [3.9, 4, 3.8, 4.3],
         show_report=False, auto_compare=False
     )
     print(res)
