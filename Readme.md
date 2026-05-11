@@ -16,9 +16,8 @@ La aplicación permite:
 
 ## 👥 Integrantes
 
-- Johan E Mesa V – cirkandia
-- Onofre Andres Benjumea – OnofreB22
-- Sebastian Vasquez S – Svasquezs1
+- Mateo Cadavid Ramirez - mcadavidr2
+- Daniela Alvarez -
 
 ---
 
@@ -47,8 +46,7 @@ Antes de ejecutar la aplicación, asegúrate de contar con lo siguiente:
 Si tienes **Git** instalado, puedes clonar el proyecto con:
 
 ```bash
-git clone https://github.com/cirkandia/AnalisisNumericoMathLab.git
-cd AnalisisNumericoMathLab
+git clone https://github.com/mcadavidr2/AnalisisNumericoProyecto.git
 ```
 ---
 
