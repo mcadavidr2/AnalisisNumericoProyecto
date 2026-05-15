@@ -6,6 +6,7 @@ import importlib
 import inspect
 import pandas as pd
 import math
+import random
 
 from Python.Vandermonde import comparar_metodos
 
@@ -1125,15 +1126,8 @@ class App(tk.Tk):
         # 🔹 NUEVO: checkbox para comparar tipos de error en el Capítulo 1
         self.compare_error_types_var = tk.BooleanVar(value=False)
 
-       
-
-       # NUEVO: tipo de error seleccionado por el usuario.
-        # Valores unificados con la imagen del enunciado:
-        #   abs  -> |x_n - x_{n-1}|
-        #   rel  -> |(x_n - x_{n-1}) / x_n|
-        #   rel2 -> |(x_n - x_{n-1}) / x_{n-1}|
-        #   rond -> |f(x_n)|       (residual / "error de redondeo")
-        error_type_var = tk.StringVar(value='rel')   
+        # NUEVO: tipo de error seleccionado por el usuario
+        error_type_var = tk.StringVar(value='rel')  # 'rel', 'abs' o 'cond'
 
         opts_frame = tk.Frame(main_frame, bg='#f0f0f0')
         opts_frame.pack(fill='x', pady=(0, 10))
@@ -1167,7 +1161,7 @@ class App(tk.Tk):
         error_combo = ttk.Combobox(
             opts_frame,
             textvariable=error_type_var,
-            values=['abs', 'rel', 'rel2', 'rond'],  # relativo, absoluto
+            values=['rel', 'abs', 'cond'],  # relativo, absoluto, condición
             width=8,
             state='readonly'
         )
@@ -1276,10 +1270,6 @@ class App(tk.Tk):
                     # NUEVO: pasar tipo de error si el método lo permite
                     if 'error_type' in f_sig.parameters:
                         kwargs['error_type'] = error_type_var.get()
-
-                    if method_name == 'SOR' and 'w' in f_sig.parameters:
-                        pass
-                    
                 except Exception:
                     pass
 
@@ -1315,7 +1305,7 @@ class App(tk.Tk):
                 # 🔹 NUEVO: Comparar TIPOS de error (abs/rel/cond) para ESTE método de raíces
                 if method_name in ROOT_METHODS and self.compare_error_types_var.get():
                     error_runs = []
-                    tipos = ['abs', 'rel', 'rel2', 'rond']
+                    tipos = ['abs', 'rel', 'cond']
 
                     for et in tipos:
                         local_kwargs = kwargs.copy()
@@ -1340,6 +1330,7 @@ class App(tk.Tk):
 
         button_frame = tk.Frame(main_frame, bg='#f0f0f0')
         button_frame.pack(pady=20)
+        
 
         tk.Button(button_frame, text="Ejecutar Método", font=("Arial", 12, "bold"),
                   bg='#27ae60', fg='white', padx=20, pady=8, cursor='hand2',
@@ -1402,17 +1393,6 @@ class App(tk.Tk):
                 command=lambda m=method_name: self.plot_root_method(m, result)
             ).pack(side='left', padx=10)
 
-            tk.Button(
-                button_frame,
-                text="Graficar errores",
-                font=("Arial", 12, "bold"),
-                bg='#9b59b6', fg='white',
-                padx=20, pady=8, cursor='hand2',
-                command=lambda m=method_name: self.plot_root_errors(m, result)
-            ).pack(side='left', padx=10)
-
-
-
         tk.Button(button_frame, text="Nuevo Cálculo", font=("Arial", 12, "bold"),
                   bg='#3498db', fg='white', padx=20, pady=8, cursor='hand2',
                   command=lambda: self.show_method_info(method_name)).pack(side='left', padx=10)
@@ -1420,6 +1400,27 @@ class App(tk.Tk):
         tk.Button(button_frame, text="Menú Principal", font=("Arial", 12),
                   bg='#95a5a6', fg='white', padx=20, pady=8, cursor='hand2',
                   command=self.show_main_menu).pack(side='left')
+
+        interpolacion_methods = ["Vandermonde", "Interpolación Lagrange", "Interpolación Newton", "Spline Lineal", "Spline Cúbico"]
+    
+        if method_name in interpolacion_methods:
+            if hasattr(self, 'ultimo_x') and hasattr(self, 'ultimo_y') and self.ultimo_x and self.ultimo_y:
+                tk.Button(
+                    button_frame,
+                    text="Validación",
+                    font=("Arial", 11, "bold"),
+                    bg='#8e44ad', fg='white',
+                    padx=15, pady=8, cursor='hand2',
+                    command=lambda: self.show_validation_selector(self.ultimo_x, self.ultimo_y, method_name)
+                ).pack(side='left', padx=10)
+        
+        tk.Button(button_frame, text="Nuevo Cálculo", font=("Arial", 12, "bold"),
+                bg='#3498db', fg='white', padx=20, pady=8, cursor='hand2',
+                command=lambda: self.show_method_info(method_name)).pack(side='left', padx=10)
+        
+        tk.Button(button_frame, text="Menú Principal", font=("Arial", 12),
+                bg='#95a5a6', fg='white', padx=20, pady=8, cursor='hand2',
+                command=self.show_main_menu).pack(side='left')
 
     def is_tabular_result(self, result):
         if isinstance(result, tuple) and len(result) >= 2:
@@ -1443,7 +1444,7 @@ class App(tk.Tk):
 
         if header_text:
             info_text = scrolledtext.ScrolledText(parent_frame, height=4, width=80,
-                                                font=("Courier", 10), bg='#ecf0f1')
+                                                  font=("Courier", 10), bg='#ecf0f1')
             info_text.pack(fill='x', padx=10, pady=(10, 5))
             info_text.insert('1.0', header_text)
             info_text.config(state='disabled')
@@ -1451,7 +1452,7 @@ class App(tk.Tk):
         table_frame = tk.Frame(parent_frame, bg='white')
         table_frame.pack(fill='both', expand=True, padx=10, pady=5)
 
-        custom_headers = False
+        custom_headers = False  # <- para saber si usamos texto tal cual o el .title()
 
         if isinstance(table_data, dict):
             columns = ["Propiedad", "Valor"]
@@ -1463,40 +1464,41 @@ class App(tk.Tk):
 
         elif isinstance(table_data, list) and len(table_data) > 0 and isinstance(table_data[0], list):
             n_cols = len(table_data[0])
-            first_row = table_data[0]
-            
-            # 🔴 DETECCIÓN de tablas de sistemas lineales (Jacobi, Gauss-Seidel, SOR)
-            # Con 6 columnas: Iter, Sol, Error_abs, Error_rel, Error_parada, Tipo
-            is_linear_system = (n_cols >= 5 and len(table_data) > 0 and isinstance(first_row[1], list))
-            
-            if is_linear_system and n_cols >= 6:
-                columns = ["Iteración", "Solución (x₁, x₂, ...)", "Error absoluto (L∞)", 
-                        "Error relativo (L∞)", "Error de parada", "Tipo error"]
-                custom_headers = True
-            elif is_linear_system and n_cols == 4:
-                columns = ["Iteración", "Solución (x₁, x₂, ...)", "Error absoluto (L∞)", "Error relativo (L∞)"]
-                custom_headers = True
-            elif method_name == "Bisección" and n_cols == 8:
+
+            # === CABECERAS PERSONALIZADAS POR MÉTODO ===
+            if method_name == "Bisección" and n_cols == 8:
                 columns = ["Iteración", "a", "f(a)", "pm", "f(pm)", "b", "f(b)", "Error Abs."]
                 custom_headers = True
+
             elif method_name == "Regla Falsa" and n_cols == 8:
+                # [Iter, A, F(A), B, F(B), Xr, F(Xr), Error]
                 columns = ["Iteración", "a", "f(a)", "b", "f(b)", "xr", "f(xr)", "Error"]
                 custom_headers = True
+
             elif method_name == "Newton" and n_cols == 5:
+                # [Iter, x, f(x), f'(x), Error]
                 columns = ["Iteración", "x_n", "f(x_n)", "f'(x_n)", "Error"]
                 custom_headers = True
+
             elif method_name == "Secante" and n_cols == 5:
+                # [Iter, x_{i-1}, x_i, f(x_i), Error]
                 columns = ["Iteración", "x_{n-1}", "x_n", "f(x_n)", "Error"]
                 custom_headers = True
+
             elif method_name == "Punto Fijo" and n_cols == 4:
+                # [Iter, x, g(x), Error]
                 columns = ["Iteración", "x_n", "g(x_n)", "Error"]
                 custom_headers = True
+
             elif method_name == "Raíces Múltiples" and n_cols == 6:
+                # [Iter, x, f(x), f'(x), f''(x), Error]
                 columns = ["Iteración", "x_n", "f(x_n)", "f'(x_n)", "f''(x_n)", "Error"]
                 custom_headers = True
+
             else:
+                # Caso genérico
                 columns = [f"Col_{i+1}" for i in range(n_cols)]
-            
+
             rows_iter = table_data
 
         else:
@@ -1507,7 +1509,7 @@ class App(tk.Tk):
 
         for col in columns:
             if custom_headers:
-                heading_text = col
+                heading_text = col          # usamos el texto tal cual lo definimos arriba
             else:
                 heading_text = col.replace('_', ' ').title()
             tree.heading(col, text=heading_text)
@@ -1517,19 +1519,7 @@ class App(tk.Tk):
             if isinstance(row, dict):
                 values = [str(row.get(col, '')) for col in columns]
             elif isinstance(row, (list, tuple)):
-                formatted_row = []
-                for idx, val in enumerate(row):
-                    if isinstance(val, list):
-                        formatted_list = [f"{x:.6f}" if isinstance(x, (int, float)) else str(x) for x in val]
-                        formatted_row.append(f"[{', '.join(formatted_list)}]")
-                    elif isinstance(val, float):
-                        if idx >= 2 and idx <= 4:
-                            formatted_row.append(f"{val:.2e}" if abs(val) < 0.001 else f"{val:.8f}")
-                        else:
-                            formatted_row.append(f"{val:.6f}")
-                    else:
-                        formatted_row.append(str(val))
-                values = formatted_row
+                values = [str(val) for val in row]
             else:
                 values = [str(row)]
             tree.insert('', 'end', values=values)
@@ -1550,13 +1540,13 @@ class App(tk.Tk):
 
         if isinstance(table_data, dict):
             tk.Label(summary_frame, text=f"Propiedades: {len(table_data)}",
-                    font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
+                     font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
         elif isinstance(table_data, list):
             tk.Label(summary_frame, text=f"Filas: {len(table_data)}",
-                    font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
+                     font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
         else:
             tk.Label(summary_frame, text="Resultado",
-                    font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
+                     font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
 
         poly_keys = ['polinomio_str', 'polinomios_por_tramo', 'polinomios_base']
         has_poly = False
@@ -1578,8 +1568,8 @@ class App(tk.Tk):
             btn_frame = tk.Frame(parent_frame, bg='#f0f0f0')
             btn_frame.pack(fill='x', padx=10, pady=(0, 10))
             tk.Button(btn_frame, text="Ver polinomio(s) completos", font=("Arial", 10, "bold"),
-                    bg='#8e44ad', fg='white', padx=10, pady=4, cursor='hand2',
-                    command=lambda txt=poly_text: self.show_polynomials_modal(txt)).pack(side='right')
+                      bg='#8e44ad', fg='white', padx=10, pady=4, cursor='hand2',
+                      command=lambda txt=poly_text: self.show_polynomials_modal(txt)).pack(side='right')
             
     def show_polynomials_modal(self, pol_text):
         modal = tk.Toplevel(self)
@@ -1713,7 +1703,6 @@ class App(tk.Tk):
         for method_name in ROOT_METHODS:
             if method_name == current_method:
                 continue  # ya lo ejecutó el usuario
-            
 
             method_info = METHODS[method_name]["module"]
             package = METHODS[method_name].get("package", "")
@@ -1978,14 +1967,8 @@ class App(tk.Tk):
         ).pack(pady=(0, 10))
 
     def plot_root_method(self, method_name, result):
-        """Grafica f(x) y la sucesión de aproximaciones x_n para varios
-        métodos de raíces.
+        """Grafica f(x) y la sucesión de aproximaciones x_n para varios métodos de raíces."""
 
-        Robusta contra iteraciones que produjeron inf o nan: los valores
-        no finitos no se grafican (matplotlib los ignora), pero la curva
-        f(x) sí se dibuja para que el usuario pueda ver visualmente por
-        qué falló. Detecta la no convergencia y agrega aviso visual.
-        """
         if not hasattr(self, 'last_function_str') or self.last_function_str is None:
             messagebox.showerror("Error", "No se encontró la función para graficar.")
             return
@@ -2004,8 +1987,6 @@ class App(tk.Tk):
             messagebox.showerror("Error", "No hay datos de iteraciones para graficar.")
             return
 
-        # Mapa de qué columna tiene la aproximación x_n para cada método.
-        # Es el mismo COLUMN_MAP de errores.py pero solo la primera componente.
         x_col_map = {
             "Bisección": 3,
             "Regla Falsa": 5,
@@ -2016,45 +1997,25 @@ class App(tk.Tk):
         }
 
         if method_name not in x_col_map:
-            messagebox.showerror(
-                "Error",
-                f"No se ha configurado graficación para el método: {method_name}"
-            )
+            messagebox.showerror("Error", f"No se ha configurado graficación para el método: {method_name}")
             return
 
         x_col = x_col_map[method_name]
 
-        # Extraemos la columna de aproximaciones, descartando inf/nan.
-        # Esto era el punto de fallo de la versión anterior: si la tabla
-        # tenía un inf, float() funcionaba pero las cuentas posteriores
-        # con f(inf) explotaban.
-        x_aprox = []
-        for row in table_data:
-            try:
-                v = float(row[x_col])
-                if np.isfinite(v):
-                    x_aprox.append(v)
-            except Exception:
-                continue
-
-        # Detección de no convergencia: si la última fila de la tabla tiene
-        # error = inf, sabemos que el método no convergió. Lo usamos para
-        # cambiar el título y agregar aviso visual.
-        no_convergente = False
         try:
-            last_err = float(table_data[-1][-1])
-            if not np.isfinite(last_err):
-                no_convergente = True
+            # CONVERSIÓN A FLOAT AQUÍ
+            x_aprox = [float(row[x_col]) for row in table_data]
         except Exception:
-            pass
+            messagebox.showerror("Error", "No se pudo extraer la columna de aproximaciones x_n.\nRevisa el formato de la tabla.")
+            return
 
-        # Decidir intervalo de graficación
+        # Intervalo para graficar
         if method_name in ["Bisección", "Regla Falsa"] and \
-                hasattr(self, 'last_a') and hasattr(self, 'last_b') and \
-                self.last_a is not None and self.last_b is not None:
+        hasattr(self, 'last_a') and hasattr(self, 'last_b') and \
+        self.last_a is not None and self.last_b is not None:
             a = self.last_a
             b = self.last_b
-        elif x_aprox:
+        else:
             xmin = min(x_aprox)
             xmax = max(x_aprox)
             if xmin == xmax:
@@ -2064,51 +2025,27 @@ class App(tk.Tk):
                 margen = (xmax - xmin) * 0.4
                 a = xmin - margen
                 b = xmax + margen
-        else:
-            a, b = -2.0, 2.0  # fallback total cuando no hay datos
 
-        # Generar la curva f(x) sobre el intervalo, atrapando errores en
-        # puntos donde f no se pueda evaluar (log de negativos, etc.)
         xs = np.linspace(a, b, 400)
-        ys = []
-        for xv in xs:
-            try:
-                ys.append(float(f(xv)))
-            except Exception:
-                ys.append(np.nan)
-        ys = np.array(ys, dtype=float)
+        ys = [f(x) for x in xs]
 
-        # Crear la ventana
         win = tk.Toplevel(self)
         win.title(f"Gráfica - Método de {method_name}")
-        win.geometry("700x520")
+        win.geometry("700x500")
 
         fig, ax = plt.subplots(figsize=(6, 4))
         ax.axhline(0, color='black', linewidth=0.8)
         ax.plot(xs, ys, label='f(x)')
 
-        # Pintar las aproximaciones (solo las finitas)
-        if x_aprox:
-            try:
-                y_aprox = []
-                for xv in x_aprox:
-                    try:
-                        y_aprox.append(float(f(xv)))
-                    except Exception:
-                        y_aprox.append(np.nan)
-                ax.scatter(x_aprox, y_aprox, color='red', marker='o',
-                           label='Aproximaciones x_n')
-            except Exception:
-                pass
-
-        # Título con etiqueta visual de no convergencia si aplica
-        title = f'Método de {method_name}'
-        if no_convergente:
-            title += '  (NO CONVERGENTE)'
+        try:
+            ax.scatter(x_aprox, [f(x) for x in x_aprox],
+                    color='red', marker='o', label='Aproximaciones x_n')
+        except Exception:
+            pass
 
         ax.set_xlabel('x')
         ax.set_ylabel('f(x)')
-        ax.set_title(title)
+        ax.set_title(f'Método de {method_name}')
         ax.grid(True)
         ax.legend()
 
@@ -2116,125 +2053,563 @@ class App(tk.Tk):
         canvas.draw()
         canvas.get_tk_widget().pack(fill='both', expand=True)
 
-        # Aviso visible cuando el método no convergió.
-        # Esto le ahorra al usuario confundirse pensando que la gráfica
-        # muestra una solución exitosa.
-        if no_convergente:
-            tk.Label(
-                win,
-                text=("El método NO convergió con los datos dados. "
-                      "Posibles causas: f(a)·f(b) ≥ 0 (no hay cambio de "
-                      "signo en el intervalo), punto inicial inadecuado, "
-                      "o g(x) no contractiva. Revisa la entrada."),
-                font=("Arial", 9), fg='#c0392b', bg='#fdecea',
-                wraplength=680, justify='left'
-            ).pack(fill='x', padx=8, pady=(0, 8))
+    def run_interpolation_validation(self, x_points, y_points, method_name, test_size=0.1):
+        """Ejecuta validación para un porcentaje específico y guarda qué puntos se usaron"""
+        import numpy as np
+        import random
+        import time
 
-    def plot_root_errors(self, method_name, result):
-        """
-        Grafica los 4 tipos de error vs número de iteración para el método
-        ejecutado, en escala semilogarítmica:
-            E_abs   = |x_n - x_{n-1}|
-            E_rel   = |(x_n - x_{n-1}) / x_n|
-            E_rel2  = |(x_n - x_{n-1}) / x_{n-1}|
-            E_rond  = |f(x_n)|        (para Punto Fijo: |g(x_n) - x_n|)
-
-        Usa el módulo errores.py que extrae las sucesiones de la tabla y
-        calcula los 4 tipos sin re-ejecutar el método.
-        """
-        # Importamos aquí (no al inicio del archivo) para no fallar si
-        # alguien tiene una versión vieja del proyecto sin errores.py
         try:
-            from Python.errores import compute_errors, extract_sequences, ERROR_LABELS
-        except Exception as e:
-            messagebox.showerror(
-                "Error",
-                f"No se pudo importar el módulo de errores:\n{e}"
-            )
+            from Python.supCp3 import SUBinterpol_lagrange
+            from Python.supCp3 import SUBinterpol_newton
+            from Python.supCp3.SUBspline_lineal import SUBSUBspline_lineal
+            from Python.supCp3.SUBspln_cubico import SUBSUBspline_cubico
+            from Python.supCp3 import Subvandermonde
+        except Exception:
+            try:
+                from Python.supCp3 import SUBinterpol_lagrange
+                from Python.supCp3 import SUBinterpol_newton
+                from Python.supCp3.SUBspline_lineal import SUBSUBspline_lineal
+                from Python.supCp3.SUBspln_cubico import SUBSUBspline_cubico
+                from Python.supCp3 import Subvandermonde
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudieron importar los métodos: {e}")
+                return
+            
+        methods_map = {
+            "Vandermonde": Subvandermonde.interpol_vandermonde,
+            "Interpolación Lagrange": SUBinterpol_lagrange.interpol_lagrange,
+            "Interpolación Newton": SUBinterpol_newton.interpol_newton,
+            "Spline Lineal": SUBSUBspline_lineal,
+            "Spline Cúbico": SUBSUBspline_cubico
+        }
+            
+        if method_name not in methods_map:
+            messagebox.showinfo("Info", f"El método {method_name} no tiene validación implementada")
             return
+            
+        metodo_func = methods_map[method_name]
+        porcentaje = int(test_size * 100)
+        
+        # Ventana de progreso
+        progress_win = tk.Toplevel(self)
+        progress_win.title("Validación en progreso")
+        progress_win.geometry("400x150")
+        progress_win.configure(bg='#f0f0f0')
+            
+        tk.Label(progress_win, text=f"Ejecutando validación para {method_name} con {porcentaje}%...",
+                font=("Arial", 12), bg='#f0f0f0', fg='#2c3e50').pack(pady=20)
+            
+        progress_bar = ttk.Progressbar(progress_win, mode='indeterminate', length=300)
+        progress_bar.pack(pady=10)
+        progress_bar.start()
+        progress_win.update()
+            
+        x = np.array(x_points)
+        y = np.array(y_points)
+        n_total = len(x)
+        
+        # Guardar los puntos originales con sus índices
+        puntos_originales = [(i, float(x[i]), float(y[i])) for i in range(n_total)]
+        
+        # Determinar cuántos puntos usar para prueba
+        n_test = max(1, int(n_total * test_size))
+        
+        metricas = {
+            'MAE': 0, 'RMSE': 0, 'Max Error': 0, 'MAPE': 0, 'R2': 0, 'Tiempo': 0
+        }
+        
+        # Guardar información de los puntos usados en la mejor ejecución
+        mejor_info = {
+            'indices_train': [],
+            'indices_test': [],
+            'puntos_train': [],
+            'puntos_test': [],
+            'predicciones': []
+        }
+        
+        n_repeticiones = min(3, n_total // n_test if n_test > 0 else 1)
+        
+        todas_metricas = {k: [] for k in metricas.keys()}
+        todas_info = []
+        
+        for rep in range(n_repeticiones):
+            # Mezclar índices manualmente
+            indices = list(range(n_total))
+            random.shuffle(indices)
+            
+            indices_test = sorted(indices[:n_test])
+            indices_train = sorted(indices[n_test:])
+            
+            # Verificar que haya al menos 2 puntos para entrenamiento
+            if len(indices_train) < 2:
+                continue
+            
+            # Ordenar puntos de entrenamiento por x
+            x_train = np.array([x[i] for i in indices_train])
+            y_train = np.array([y[i] for i in indices_train])
+            orden = np.argsort(x_train)
+            x_train = x_train[orden]
+            y_train = y_train[orden]
+            
+            x_test = np.array([x[i] for i in indices_test])
+            y_test = np.array([y[i] for i in indices_test])
+            
+            try:
+                start_time = time.perf_counter()
+                resultado = metodo_func(x_train.tolist(), y_train.tolist())
+                end_time = time.perf_counter()
+                tiempo = end_time - start_time
+                
+                y_pred = self._evaluar_interpolacion(resultado, x_test)
+                
+                if y_pred is not None and len(y_pred) == len(y_test):
+                    # Calcular métricas
+                    mae = np.mean(np.abs(y_test - y_pred))
+                    rmse = np.sqrt(np.mean((y_test - y_pred) ** 2))
+                    max_error = np.max(np.abs(y_test - y_pred))
+                    
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        mape = np.mean(np.abs((y_test - y_pred) / (y_test + 1e-10))) * 100
+                        if np.isinf(mape) or np.isnan(mape):
+                            mape = float('inf')
+                    
+                    ss_res = np.sum((y_test - y_pred) ** 2)
+                    ss_tot = np.sum((y_test - np.mean(y_test)) ** 2)
+                    r2 = 1 - (ss_res / ss_tot) if ss_tot > 1e-10 else 0
+                    
+                    todas_metricas['MAE'].append(mae)
+                    todas_metricas['RMSE'].append(rmse)
+                    todas_metricas['Max Error'].append(max_error)
+                    todas_metricas['MAPE'].append(mape)
+                    todas_metricas['R2'].append(r2)
+                    todas_metricas['Tiempo'].append(tiempo)
+                    
+                    # Guardar información de esta repetición
+                    todas_info.append({
+                        'indices_train': indices_train,
+                        'indices_test': indices_test,
+                        'puntos_train': [(x[i], y[i]) for i in indices_train],
+                        'puntos_test': [(x[i], y[i]) for i in indices_test],
+                        'predicciones': list(zip(x_test, y_pred)),
+                        'r2': r2,
+                        'mae': mae
+                    })
+                    
+            except Exception as e:
+                print(f"Error en repetición {rep}: {e}")
+                continue
+        
+        # Encontrar la mejor repetición (mayor R² o menor MAE)
+        if todas_info:
+            mejor_rep = min(todas_info, key=lambda info: info['mae'])
+            mejor_info = mejor_rep
+        
+        # Promediar resultados
+        for key in todas_metricas:
+            if todas_metricas[key]:
+                metricas[key] = np.mean(todas_metricas[key])
+            else:
+                metricas[key] = float('nan')
+        
+        resultados = {porcentaje: metricas}
+            
+        progress_bar.stop()
+        progress_win.destroy()
+        
+        # Mostrar resultados con la información de los puntos
+        self.show_validation_results(method_name, resultados, mejor_info, puntos_originales, porcentaje)
 
-        # Extraer la tabla del resultado. Los métodos devuelven una tupla
-        # (raíz, f(raíz), iteraciones, tabla); la tabla es el último elemento.
-        table_data = result[-1] if isinstance(result, tuple) else result
-        if not isinstance(table_data, list) or len(table_data) == 0:
-            messagebox.showerror(
-                "Error",
-                "No hay datos de iteraciones para graficar."
-            )
-            return
+    def _evaluar_interpolacion(self, resultado, x_test):
+        """
+        Evalúa el resultado de interpolación en los puntos x_test.
+        Cada método puede devolver diferentes formatos.
+        """
+        import numpy as np
+        
+        if resultado is None:
+            return None
+        
+        # Caso 1: resultado es una tupla (x_plot, y_plot)
+        if isinstance(resultado, tuple) and len(resultado) >= 2:
+            x_plot = np.array(resultado[0])
+            y_plot = np.array(resultado[1])
+            # Interpolación lineal entre los puntos generados por el método
+            return np.interp(x_test, x_plot, y_plot, left=np.nan, right=np.nan)
+        
+        # Caso 2: resultado es un diccionario con coeficientes
+        elif isinstance(resultado, dict):
+            # Intentar obtener polinomio en formato string
+            if 'polinomio_str' in resultado:
+                # Intentar evaluar el polinomio
+                pol_str = resultado['polinomio_str']
+                try:
+                    # Reemplazar ^ por ** para Python
+                    pol_str = pol_str.replace('^', '**')
+                    # Función lambda para evaluar
+                    f = lambda x: eval(pol_str, {'np': np, 'x': x})
+                    return np.array([f(xi) for xi in x_test])
+                except:
+                    pass
+            
+            # Si hay coeficientes
+            if 'coeficientes' in resultado:
+                coef = resultado['coeficientes']
+                return np.polyval(coef[::-1], x_test)
+        
+        # Caso 3: resultado es una lista con polinomios por tramo (splines)
+        elif isinstance(resultado, (list, tuple)) and len(resultado) > 0:
+            # Para splines, el primer elemento podría ser los puntos x
+            if len(resultado) >= 2 and isinstance(resultado[0], (list, np.ndarray)) and isinstance(resultado[1], (list, np.ndarray)):
+                return np.interp(x_test, resultado[0], resultado[1])
+        
+        return None
 
-        # Extraer sucesiones x_n y residual desde la tabla
-        try:
-            x_seq, residual_seq = extract_sequences(method_name, table_data)
-        except Exception as e:
-            messagebox.showerror(
-                "Error",
-                f"No se pudieron extraer las sucesiones de la tabla: {e}"
-            )
-            return
+    def show_validation_selector(self, x_points, y_points, method_name):
+        """Muestra diálogo para seleccionar el porcentaje de validación"""
+        selector_win = tk.Toplevel(self)
+        selector_win.title("Seleccionar porcentaje de validación")
+        selector_win.geometry("400x250")
+        selector_win.configure(bg='#f0f0f0')
+        selector_win.transient(self)
+        selector_win.grab_set()
+        
+        tk.Label(selector_win, text=f"Validación para {method_name}", 
+                font=("Arial", 14, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(pady=15)
+        
+        tk.Label(selector_win, text="Seleccione el porcentaje de datos de prueba:", 
+                font=("Arial", 11), bg='#f0f0f0', fg='#7f8c8d').pack(pady=5)
+        
+        porcentaje_var = tk.StringVar(value="10")
+        
+        frame_opciones = tk.Frame(selector_win, bg='#f0f0f0')
+        frame_opciones.pack(pady=15)
+        
+        tk.Radiobutton(frame_opciones, text="10%", variable=porcentaje_var, value="10",
+                    font=("Arial", 11), bg='#f0f0f0', anchor='w').pack(anchor='w', padx=20, pady=5)
+        tk.Radiobutton(frame_opciones, text="20%", variable=porcentaje_var, value="20",
+                    font=("Arial", 11), bg='#f0f0f0', anchor='w').pack(anchor='w', padx=20, pady=5)
+        tk.Radiobutton(frame_opciones, text="30%", variable=porcentaje_var, value="30",
+                    font=("Arial", 11), bg='#f0f0f0', anchor='w').pack(anchor='w', padx=20, pady=5)
+        
+        frame_botones = tk.Frame(selector_win, bg='#f0f0f0')
+        frame_botones.pack(pady=20)
+        
+        def ejecutar():
+            porcentaje = int(porcentaje_var.get()) / 100
+            selector_win.destroy()
+            self.run_interpolation_validation(x_points, y_points, method_name, porcentaje)
+        
+        tk.Button(frame_botones, text="Ejecutar validación", command=ejecutar,
+                bg='#27ae60', fg='white', font=("Arial", 11, "bold"), padx=15, pady=5).pack(side='left', padx=10)
+        
+        tk.Button(frame_botones, text="Cancelar", command=selector_win.destroy,
+                bg='#95a5a6', fg='white', font=("Arial", 11), padx=15, pady=5).pack(side='left', padx=10)
 
-        # Calcular los 4 errores
-        errs = compute_errors(x_seq, residual_seq)
-        n = len(x_seq)
-        iters = np.arange(n)
-
-        # Limpieza para escala log: matplotlib ignora NaN, pero log(0) = -inf
-        # rompe el plot. Reemplazamos ceros e infinitos por NaN.
-        def clean(arr):
-            arr = np.array(arr, dtype=float)
-            arr = np.where(arr == 0, np.nan, arr)
-            arr = np.where(np.isinf(arr), np.nan, arr)
-            return arr
-
-        # Crear ventana
+    def show_validation_results(self, method_name, resultados, mejor_info, puntos_originales, porcentaje_ejecutado):
+        """Muestra resultados de validación con la información de qué puntos se usaron"""
+        import numpy as np
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        import matplotlib.pyplot as plt
+        
+        # Crear ventana con tamaño más grande
         win = tk.Toplevel(self)
-        win.title(f"Gráfica de errores - {method_name}")
-        win.geometry("780x560")
-
-        fig, ax = plt.subplots(figsize=(7, 4.6))
-
-        # Las cuatro curvas. Cada una con su propio marcador para que se
-        # distingan aunque se solapen (cosa que pasa al final de la convergencia).
-        ax.semilogy(iters, clean(errs["abs"]),  marker='o', linewidth=1.5,
-                    label=ERROR_LABELS["abs"])
-        ax.semilogy(iters, clean(errs["rel"]),  marker='s', linewidth=1.5,
-                    label=ERROR_LABELS["rel"])
-        ax.semilogy(iters, clean(errs["rel2"]), marker='^', linewidth=1.5,
-                    label=ERROR_LABELS["rel2"])
-
-        # rond solo se grafica si tenemos datos. Para Punto Fijo, cambiamos
-        # la etiqueta porque ahí 'rond' significa |g(x_n) - x_n|, no |f(x_n)|.
-        if not np.all(np.isnan(errs["rond"])):
-            label_rond = ERROR_LABELS["rond"]
-            if method_name == "Punto Fijo":
-                label_rond = "E_rond = |g(xₙ) − xₙ|"
-            ax.semilogy(iters, clean(errs["rond"]), marker='d', linewidth=1.5,
-                        label=label_rond)
-
-        ax.set_xlabel("Iteración n")
-        ax.set_ylabel("Error (escala log)")
-        ax.set_title(f"Convergencia del error - {method_name}")
-        ax.grid(True, which="both", linestyle="--", alpha=0.4)
-        ax.legend(loc="best", fontsize=9)
-
-        canvas = FigureCanvasTkAgg(fig, master=win)
+        win.title(f"Validación - {method_name} ({porcentaje_ejecutado}%)")
+        win.geometry("1000x800")
+        win.configure(bg='#f0f0f0')
+        
+        # Frame superior con título
+        title_frame = tk.Frame(win, bg='#f0f0f0')
+        title_frame.pack(fill='x', padx=10, pady=5)
+        
+        tk.Label(title_frame, text=f"VALIDACIÓN CRUZADA - {method_name.upper()}",
+                font=("Arial", 14, "bold"), bg='#f0f0f0', fg='#2c3e50').pack()
+        
+        tk.Label(title_frame, text=f"Validación con {porcentaje_ejecutado}% de datos de prueba",
+                font=("Arial", 10), bg='#f0f0f0', fg='#7f8c8d').pack()
+        
+        # ADVERTENCIA si R² es negativo
+        for p, r in resultados.items():
+            r2 = r.get('R2', 0)
+            if r2 < 0:
+                warning_frame = tk.Frame(win, bg='#fdebd0', relief='solid', bd=1)
+                warning_frame.pack(fill='x', padx=10, pady=5)
+                tk.Label(warning_frame, 
+                        text=f"⚠ ADVERTENCIA: R² negativo ({r2:.4f}) - El modelo predice peor que la media",
+                        font=("Arial", 10, "bold"), bg='#fdebd0', fg='#c0392b').pack(padx=10, pady=5)
+        
+        # ========== PANEL DE PUNTOS USADOS ==========
+        puntos_frame = tk.LabelFrame(win, text="Datos utilizados en la validación", 
+                                    font=("Arial", 11, "bold"), bg='#f0f0f0', fg='#2c3e50')
+        puntos_frame.pack(fill='x', padx=10, pady=5)
+        
+        # Frame para dos columnas
+        cols_frame = tk.Frame(puntos_frame, bg='#f0f0f0')
+        cols_frame.pack(fill='x', padx=10, pady=5)
+        
+        # Columna izquierda: Puntos de ENTRENAMIENTO
+        train_frame = tk.LabelFrame(cols_frame, text="📚 Puntos de ENTRENAMIENTO", 
+                                    font=("Arial", 10, "bold"), bg='#d5f5e3', fg='#27ae60')
+        train_frame.pack(side='left', fill='both', expand=True, padx=5, pady=5)
+        
+        train_text = scrolledtext.ScrolledText(train_frame, height=8, width=35, font=("Courier", 9))
+        train_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        train_str = f"Total: {len(mejor_info['puntos_train'])} puntos\n\n"
+        for i, (x_val, y_val) in enumerate(mejor_info['puntos_train']):
+            train_str += f"Punto {i+1}: ({x_val}, {y_val})\n"
+        train_text.insert('1.0', train_str)
+        train_text.config(state='disabled')
+        
+        # Columna derecha: Puntos de PRUEBA
+        test_frame = tk.LabelFrame(cols_frame, text="🔬 Puntos de PRUEBA (validación)", 
+                                    font=("Arial", 10, "bold"), bg='#fdebd0', fg='#e74c3c')
+        test_frame.pack(side='right', fill='both', expand=True, padx=5, pady=5)
+        
+        test_text = scrolledtext.ScrolledText(test_frame, height=8, width=35, font=("Courier", 9))
+        test_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        test_str = f"Total: {len(mejor_info['puntos_test'])} puntos\n\n"
+        for i, (x_val, y_val) in enumerate(mejor_info['puntos_test']):
+            # Buscar predicción para este punto
+            pred_val = None
+            for x_pred, y_pred in mejor_info['predicciones']:
+                if abs(x_pred - x_val) < 1e-8:
+                    pred_val = y_pred
+                    break
+            
+            if pred_val is not None:
+                test_str += f"Punto {i+1}: ({x_val}, {y_val}) → Predicción: {pred_val:.4f}\n"
+                test_str += f"         Error: {abs(y_val - pred_val):.4f}\n"
+            else:
+                test_str += f"Punto {i+1}: ({x_val}, {y_val})\n"
+        test_text.insert('1.0', test_str)
+        test_text.config(state='disabled')
+        
+        # ========== GRÁFICA DE PUNTOS ==========
+        grafica_frame = tk.LabelFrame(win, text="Visualización de la interpolación", 
+                                    font=("Arial", 11, "bold"), bg='#f0f0f0', fg='#2c3e50')
+        grafica_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        # Crear figura
+        fig, ax = plt.subplots(figsize=(10, 4))
+        
+        # Puntos de entrenamiento (azul)
+        x_train = [p[0] for p in mejor_info['puntos_train']]
+        y_train = [p[1] for p in mejor_info['puntos_train']]
+        ax.scatter(x_train, y_train, color='blue', s=80, marker='o', label='Entrenamiento', zorder=3)
+        
+        # Puntos de prueba (rojo)
+        x_test = [p[0] for p in mejor_info['puntos_test']]
+        y_test = [p[1] for p in mejor_info['puntos_test']]
+        ax.scatter(x_test, y_test, color='red', s=100, marker='s', label='Prueba (real)', zorder=3)
+        
+        # Predicciones (verde)
+        x_pred = [p[0] for p in mejor_info['predicciones']]
+        y_pred = [p[1] for p in mejor_info['predicciones']]
+        ax.scatter(x_pred, y_pred, color='green', s=80, marker='^', label='Predicción', zorder=3)
+        
+        # Líneas conectando real vs predicción
+        for i, (xr, yr) in enumerate(mejor_info['puntos_test']):
+            yp = None
+            for xp, yp_val in mejor_info['predicciones']:
+                if abs(xp - xr) < 1e-8:
+                    yp = yp_val
+                    break
+            if yp is not None:
+                ax.plot([xr, xr], [yr, yp], 'k--', alpha=0.5, linewidth=1)
+        
+        ax.set_xlabel('x', fontsize=11)
+        ax.set_ylabel('y', fontsize=11)
+        ax.set_title(f'{method_name} - Puntos de entrenamiento vs prueba', fontsize=12)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        canvas = FigureCanvasTkAgg(fig, master=grafica_frame)
         canvas.draw()
-        canvas.get_tk_widget().pack(fill='both', expand=True)
+        canvas.get_tk_widget().pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # ========== TABLA DE RESULTADOS ==========
+        table_frame = tk.LabelFrame(win, text="Métricas de rendimiento", 
+                                    font=("Arial", 11, "bold"), bg='#f0f0f0', fg='#2c3e50')
+        table_frame.pack(fill='x', padx=10, pady=5)
+        
+        columns = ["Métrica", "Valor", "Interpretación"]
+        tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=6)
+        
+        for col in columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=200, anchor='center')
+        
+        r = resultados[porcentaje_ejecutado]
+        
+        # Interpretación de cada métrica
+        mae = r.get('MAE', 0)
+        rmse = r.get('RMSE', 0)
+        max_err = r.get('Max Error', 0)
+        mape = r.get('MAPE', 0)
+        r2 = r.get('R2', 0)
+        tiempo = r.get('Tiempo', 0)
+        
+        if r2 >= 0.8:
+            r2_interp = "✅ Buen ajuste"
+        elif r2 >= 0.5:
+            r2_interp = "📈 Ajuste moderado"
+        elif r2 >= 0:
+            r2_interp = "⚠️ Ajuste pobre"
+        else:
+            r2_interp = "❌ Muy pobre (peor que la media)"
+        
+        if mape < 10:
+            mape_interp = "✅ Excelente"
+        elif mape < 20:
+            mape_interp = "📊 Aceptable"
+        elif mape < 30:
+            mape_interp = "⚠️ Alto"
+        else:
+            mape_interp = "❌ Muy alto"
+        
+        metricas_data = [
+            ("MAE (Error Absoluto Medio)", f"{mae:.6e}", f"Error promedio: {mae:.4f}"),
+            ("RMSE (Raíz error cuadrático)", f"{rmse:.6e}", f"Sensible a outliers: {rmse:.4f}"),
+            ("Max Error", f"{max_err:.6e}", f"Peor predicción: {max_err:.4f}"),
+            ("MAPE", f"{mape:.2f}%", mape_interp),
+            ("R² (Coef. determinación)", f"{r2:.4f}", r2_interp),
+            ("Tiempo de ejecución", f"{tiempo:.6f} s", "Tiempo promedio por ejecución")
+        ]
+        
+        for metrica, valor, interp in metricas_data:
+            tree.insert('', 'end', values=(metrica, valor, interp))
+        
+        v_scrollbar = ttk.Scrollbar(table_frame, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=v_scrollbar.set)
+        
+        tree.pack(side='left', fill='both', expand=True)
+        v_scrollbar.pack(side='right', fill='y')
+        
+        # ========== DIAGNÓSTICO ==========
+        diag_frame = tk.LabelFrame(win, text="Diagnóstico y Recomendaciones", 
+                                    font=("Arial", 11, "bold"), bg='#f0f0f0', fg='#2c3e50')
+        diag_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        diagnostico = self._generar_diagnostico_mejorado(method_name, resultados, porcentaje_ejecutado, mejor_info)
+        
+        diag_text = scrolledtext.ScrolledText(diag_frame, height=10, wrap='word', 
+                                            font=("Arial", 10), bg='#f8f9fa')
+        diag_text.pack(fill='both', expand=True, padx=10, pady=5)
+        diag_text.insert('1.0', diagnostico)
+        diag_text.config(state='disabled')
+        
+        # ========== BOTONES ==========
+        btn_frame = tk.Frame(win, bg='#f0f0f0')
+        btn_frame.pack(pady=10)
+        
+        def save_results():
+            from datetime import datetime
+            import json
+            
+            filename = f"validacion_{method_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            resultados_json = {
+                'method': method_name,
+                'porcentaje': porcentaje_ejecutado,
+                'metricas': {k: float(v) for k, v in r.items()},
+                'puntos_entrenamiento': mejor_info['puntos_train'],
+                'puntos_prueba': mejor_info['puntos_test'],
+                'predicciones': mejor_info['predicciones']
+            }
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(resultados_json, f, indent=4, ensure_ascii=False)
+            messagebox.showinfo("Guardado", f"Resultados guardados en {filename}")
+        
+        tk.Button(btn_frame, text="Guardar resultados", command=save_results,
+                bg='#3498db', fg='white', padx=15, pady=5).pack(side='left', padx=5)
+        
+        tk.Button(btn_frame, text="Cerrar", command=win.destroy,
+                bg='#95a5a6', fg='white', padx=15, pady=5).pack(side='left', padx=5)
 
-        # Texto explicativo abajo: ayuda al usuario (y al profe) a leer
-        # la gráfica en términos de teoría.
-        tk.Label(
-            win,
-            text=("Escala logarítmica en y: la pendiente indica la tasa de "
-                  "convergencia. Pendiente decreciente lineal = convergencia "
-                  "lineal (bisección, punto fijo); pendiente que se duplica "
-                  "cada paso = cuadrática (Newton, raíces múltiples)."),
-            font=("Arial", 9), fg='#34495e', bg='#ecf0f1',
-            wraplength=760, justify='left'
-        ).pack(fill='x', padx=8, pady=(0, 6))
-
-
+    def _generar_diagnostico_mejorado(self, method_name, resultados, porcentaje, mejor_info):
+        """Genera diagnóstico mejorado con información de los puntos"""
+        
+        r = resultados[porcentaje]
+        r2 = r.get('R2', 0)
+        mape = r.get('MAPE', 0)
+        max_error = r.get('Max Error', 0)
+        
+        diagnosticos = []
+        diagnosticos.append(f"{'='*70}")
+        diagnosticos.append(f"📊 DIAGNÓSTICO PARA {method_name.upper()}")
+        diagnosticos.append(f"{'='*70}\n")
+        
+        diagnosticos.append(f"📌 Resumen de la validación ({porcentaje}% de prueba):")
+        diagnosticos.append(f"   • {len(mejor_info['puntos_train'])} puntos de entrenamiento")
+        diagnosticos.append(f"   • {len(mejor_info['puntos_test'])} puntos de prueba")
+        diagnosticos.append(f"   • R² = {r2:.4f}")
+        diagnosticos.append(f"   • MAPE = {mape:.2f}%")
+        diagnosticos.append(f"   • Error máximo = {max_error:.4f}\n")
+        
+        # Análisis de R²
+        if r2 < 0:
+            diagnosticos.append(f"❌ PROBLEMA CRÍTICO: R² NEGATIVO ({r2:.4f})")
+            diagnosticos.append(f"   Significa que el modelo predice PEOR que simplemente usar el promedio de los datos.")
+            diagnosticos.append(f"")
+            diagnosticos.append(f"   Causas más probables para {method_name}:")
+            
+            if method_name == "Spline Cúbico":
+                diagnosticos.append(f"   1. Los datos tienen cambios bruscos que el spline no puede seguir")
+                diagnosticos.append(f"   2. Hay puntos atípicos que distorsionan el spline")
+                diagnosticos.append(f"   3. Los puntos x no están ordenados o hay valores repetidos")
+            elif method_name == "Interpolación Newton":
+                diagnosticos.append(f"   1. El polinomio es de grado {len(mejor_info['puntos_train'])-1} (demasiado alto)")
+                diagnosticos.append(f"   2. Fenómeno de Runge: oscilaciones violentas entre puntos")
+            elif method_name == "Vandermonde":
+                diagnosticos.append(f"   1. La matriz de Vandermonde está mal condicionada")
+                diagnosticos.append(f"   2. Problemas numéricos por puntos muy cercanos o separados")
+            else:
+                diagnosticos.append(f"   1. El método no es adecuado para este tipo de datos")
+                diagnosticos.append(f"   2. Hay demasiada variación en los datos")
+            
+            diagnosticos.append(f"\n💡 SOLUCIÓN RECOMENDADA:")
+            diagnosticos.append(f"   • Prueba con SPLINE LINEAL (más estable para datos con ruido)")
+            diagnosticos.append(f"   • Reduce el número de puntos o usa suavizado previo")
+            diagnosticos.append(f"   • Considera usar REGRESIÓN en lugar de interpolación exacta")
+        
+        elif r2 < 0.5:
+            diagnosticos.append(f"⚠️ R² BAJO ({r2:.4f}) - El modelo explica menos del 50% de la varianza")
+            diagnosticos.append(f"   Sugerencias para mejorar:")
+            diagnosticos.append(f"   • Aumenta el número de puntos de entrenamiento")
+            diagnosticos.append(f"   • Verifica que no haya puntos atípicos en los datos de prueba")
+            diagnosticos.append(f"   • Prueba con otro método de interpolación")
+        
+        else:
+            diagnosticos.append(f"✅ R² ACEPTABLE ({r2:.4f}) - El modelo funciona correctamente")
+        
+        # Análisis de MAPE
+        diagnosticos.append(f"\n📊 Análisis del error porcentual (MAPE = {mape:.2f}%):")
+        if mape < 10:
+            diagnosticos.append(f"   ✅ Excelente - Las predicciones son muy precisas")
+        elif mape < 20:
+            diagnosticos.append(f"   📈 Aceptable - Las predicciones son razonablemente precisas")
+        elif mape < 30:
+            diagnosticos.append(f"   ⚠️ Alto - Las predicciones tienen error significativo")
+        else:
+            diagnosticos.append(f"   ❌ Muy alto - Las predicciones no son confiables")
+        
+        # Mostrar puntos problemáticos
+        diagnosticos.append(f"\n🔍 PUNTOS CON MAYOR ERROR:")
+        errores = []
+        for i, ((x_test, y_test), (x_pred, y_pred)) in enumerate(zip(mejor_info['puntos_test'], mejor_info['predicciones'])):
+            error = abs(y_test - y_pred)
+            errores.append((x_test, y_test, y_pred, error))
+        
+        errores_ordenados = sorted(errores, key=lambda e: e[3], reverse=True)
+        for i, (x_val, y_real, y_pred, error) in enumerate(errores_ordenados[:3]):
+            diagnosticos.append(f"   {i+1}. x={x_val}: real={y_real:.4f} → predicho={y_pred:.4f} (error={error:.4f})")
+        
+        diagnosticos.append(f"\n{'='*70}")
+        
+        return "\n".join(diagnosticos)
 
 if __name__ == "__main__":
     app = App()
     app.mainloop()
+
