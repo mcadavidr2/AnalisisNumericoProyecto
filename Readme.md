@@ -17,7 +17,7 @@ La aplicación permite:
 ## 👥 Integrantes
 
 - Mateo Cadavid Ramirez - mcadavidr2
-- Daniela Alvarez - dalvarez9
+- Daniela Álvarez Acevedo - dalvarez9
 
 ---
 
