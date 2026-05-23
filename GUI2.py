@@ -1125,8 +1125,15 @@ class App(tk.Tk):
         # 🔹 NUEVO: checkbox para comparar tipos de error en el Capítulo 1
         self.compare_error_types_var = tk.BooleanVar(value=False)
 
-        # NUEVO: tipo de error seleccionado por el usuario
-        error_type_var = tk.StringVar(value='rel')  # 'rel', 'abs' o 'cond'
+       
+
+       # NUEVO: tipo de error seleccionado por el usuario.
+        # Valores unificados con la imagen del enunciado:
+        #   abs  -> |x_n - x_{n-1}|
+        #   rel  -> |(x_n - x_{n-1}) / x_n|
+        #   rel2 -> |(x_n - x_{n-1}) / x_{n-1}|
+        #   rond -> |f(x_n)|       (residual / "error de redondeo")
+        error_type_var = tk.StringVar(value='rel')   
 
         opts_frame = tk.Frame(main_frame, bg='#f0f0f0')
         opts_frame.pack(fill='x', pady=(0, 10))
@@ -1160,7 +1167,7 @@ class App(tk.Tk):
         error_combo = ttk.Combobox(
             opts_frame,
             textvariable=error_type_var,
-            values=['rel', 'abs', 'cond'],  # relativo, absoluto, condición
+            values=['abs', 'rel', 'rel2', 'rond'],  # relativo, absoluto
             width=8,
             state='readonly'
         )
@@ -1269,6 +1276,10 @@ class App(tk.Tk):
                     # NUEVO: pasar tipo de error si el método lo permite
                     if 'error_type' in f_sig.parameters:
                         kwargs['error_type'] = error_type_var.get()
+
+                    if method_name == 'SOR' and 'w' in f_sig.parameters:
+                        pass
+                    
                 except Exception:
                     pass
 
@@ -1304,7 +1315,7 @@ class App(tk.Tk):
                 # 🔹 NUEVO: Comparar TIPOS de error (abs/rel/cond) para ESTE método de raíces
                 if method_name in ROOT_METHODS and self.compare_error_types_var.get():
                     error_runs = []
-                    tipos = ['abs', 'rel', 'cond']
+                    tipos = ['abs', 'rel', 'rel2', 'rond']
 
                     for et in tipos:
                         local_kwargs = kwargs.copy()
@@ -1391,6 +1402,17 @@ class App(tk.Tk):
                 command=lambda m=method_name: self.plot_root_method(m, result)
             ).pack(side='left', padx=10)
 
+            tk.Button(
+                button_frame,
+                text="Graficar errores",
+                font=("Arial", 12, "bold"),
+                bg='#9b59b6', fg='white',
+                padx=20, pady=8, cursor='hand2',
+                command=lambda m=method_name: self.plot_root_errors(m, result)
+            ).pack(side='left', padx=10)
+
+
+
         tk.Button(button_frame, text="Nuevo Cálculo", font=("Arial", 12, "bold"),
                   bg='#3498db', fg='white', padx=20, pady=8, cursor='hand2',
                   command=lambda: self.show_method_info(method_name)).pack(side='left', padx=10)
@@ -1421,7 +1443,7 @@ class App(tk.Tk):
 
         if header_text:
             info_text = scrolledtext.ScrolledText(parent_frame, height=4, width=80,
-                                                  font=("Courier", 10), bg='#ecf0f1')
+                                                font=("Courier", 10), bg='#ecf0f1')
             info_text.pack(fill='x', padx=10, pady=(10, 5))
             info_text.insert('1.0', header_text)
             info_text.config(state='disabled')
@@ -1429,7 +1451,7 @@ class App(tk.Tk):
         table_frame = tk.Frame(parent_frame, bg='white')
         table_frame.pack(fill='both', expand=True, padx=10, pady=5)
 
-        custom_headers = False  # <- para saber si usamos texto tal cual o el .title()
+        custom_headers = False
 
         if isinstance(table_data, dict):
             columns = ["Propiedad", "Valor"]
@@ -1441,41 +1463,40 @@ class App(tk.Tk):
 
         elif isinstance(table_data, list) and len(table_data) > 0 and isinstance(table_data[0], list):
             n_cols = len(table_data[0])
-
-            # === CABECERAS PERSONALIZADAS POR MÉTODO ===
-            if method_name == "Bisección" and n_cols == 8:
+            first_row = table_data[0]
+            
+            # 🔴 DETECCIÓN de tablas de sistemas lineales (Jacobi, Gauss-Seidel, SOR)
+            # Con 6 columnas: Iter, Sol, Error_abs, Error_rel, Error_parada, Tipo
+            is_linear_system = (n_cols >= 5 and len(table_data) > 0 and isinstance(first_row[1], list))
+            
+            if is_linear_system and n_cols >= 6:
+                columns = ["Iteración", "Solución (x₁, x₂, ...)", "Error absoluto (L∞)", 
+                        "Error relativo (L∞)", "Error de parada", "Tipo error"]
+                custom_headers = True
+            elif is_linear_system and n_cols == 4:
+                columns = ["Iteración", "Solución (x₁, x₂, ...)", "Error absoluto (L∞)", "Error relativo (L∞)"]
+                custom_headers = True
+            elif method_name == "Bisección" and n_cols == 8:
                 columns = ["Iteración", "a", "f(a)", "pm", "f(pm)", "b", "f(b)", "Error Abs."]
                 custom_headers = True
-
             elif method_name == "Regla Falsa" and n_cols == 8:
-                # [Iter, A, F(A), B, F(B), Xr, F(Xr), Error]
                 columns = ["Iteración", "a", "f(a)", "b", "f(b)", "xr", "f(xr)", "Error"]
                 custom_headers = True
-
             elif method_name == "Newton" and n_cols == 5:
-                # [Iter, x, f(x), f'(x), Error]
                 columns = ["Iteración", "x_n", "f(x_n)", "f'(x_n)", "Error"]
                 custom_headers = True
-
             elif method_name == "Secante" and n_cols == 5:
-                # [Iter, x_{i-1}, x_i, f(x_i), Error]
                 columns = ["Iteración", "x_{n-1}", "x_n", "f(x_n)", "Error"]
                 custom_headers = True
-
             elif method_name == "Punto Fijo" and n_cols == 4:
-                # [Iter, x, g(x), Error]
                 columns = ["Iteración", "x_n", "g(x_n)", "Error"]
                 custom_headers = True
-
             elif method_name == "Raíces Múltiples" and n_cols == 6:
-                # [Iter, x, f(x), f'(x), f''(x), Error]
                 columns = ["Iteración", "x_n", "f(x_n)", "f'(x_n)", "f''(x_n)", "Error"]
                 custom_headers = True
-
             else:
-                # Caso genérico
                 columns = [f"Col_{i+1}" for i in range(n_cols)]
-
+            
             rows_iter = table_data
 
         else:
@@ -1486,7 +1507,7 @@ class App(tk.Tk):
 
         for col in columns:
             if custom_headers:
-                heading_text = col          # usamos el texto tal cual lo definimos arriba
+                heading_text = col
             else:
                 heading_text = col.replace('_', ' ').title()
             tree.heading(col, text=heading_text)
@@ -1496,7 +1517,19 @@ class App(tk.Tk):
             if isinstance(row, dict):
                 values = [str(row.get(col, '')) for col in columns]
             elif isinstance(row, (list, tuple)):
-                values = [str(val) for val in row]
+                formatted_row = []
+                for idx, val in enumerate(row):
+                    if isinstance(val, list):
+                        formatted_list = [f"{x:.6f}" if isinstance(x, (int, float)) else str(x) for x in val]
+                        formatted_row.append(f"[{', '.join(formatted_list)}]")
+                    elif isinstance(val, float):
+                        if idx >= 2 and idx <= 4:
+                            formatted_row.append(f"{val:.2e}" if abs(val) < 0.001 else f"{val:.8f}")
+                        else:
+                            formatted_row.append(f"{val:.6f}")
+                    else:
+                        formatted_row.append(str(val))
+                values = formatted_row
             else:
                 values = [str(row)]
             tree.insert('', 'end', values=values)
@@ -1517,13 +1550,13 @@ class App(tk.Tk):
 
         if isinstance(table_data, dict):
             tk.Label(summary_frame, text=f"Propiedades: {len(table_data)}",
-                     font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
+                    font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
         elif isinstance(table_data, list):
             tk.Label(summary_frame, text=f"Filas: {len(table_data)}",
-                     font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
+                    font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
         else:
             tk.Label(summary_frame, text="Resultado",
-                     font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
+                    font=("Arial", 10, "bold"), bg='#f0f0f0', fg='#2c3e50').pack(side='left')
 
         poly_keys = ['polinomio_str', 'polinomios_por_tramo', 'polinomios_base']
         has_poly = False
@@ -1545,8 +1578,8 @@ class App(tk.Tk):
             btn_frame = tk.Frame(parent_frame, bg='#f0f0f0')
             btn_frame.pack(fill='x', padx=10, pady=(0, 10))
             tk.Button(btn_frame, text="Ver polinomio(s) completos", font=("Arial", 10, "bold"),
-                      bg='#8e44ad', fg='white', padx=10, pady=4, cursor='hand2',
-                      command=lambda txt=poly_text: self.show_polynomials_modal(txt)).pack(side='right')
+                    bg='#8e44ad', fg='white', padx=10, pady=4, cursor='hand2',
+                    command=lambda txt=poly_text: self.show_polynomials_modal(txt)).pack(side='right')
             
     def show_polynomials_modal(self, pol_text):
         modal = tk.Toplevel(self)
@@ -1680,6 +1713,7 @@ class App(tk.Tk):
         for method_name in ROOT_METHODS:
             if method_name == current_method:
                 continue  # ya lo ejecutó el usuario
+            
 
             method_info = METHODS[method_name]["module"]
             package = METHODS[method_name].get("package", "")
@@ -1944,8 +1978,14 @@ class App(tk.Tk):
         ).pack(pady=(0, 10))
 
     def plot_root_method(self, method_name, result):
-        """Grafica f(x) y la sucesión de aproximaciones x_n para varios métodos de raíces."""
+        """Grafica f(x) y la sucesión de aproximaciones x_n para varios
+        métodos de raíces.
 
+        Robusta contra iteraciones que produjeron inf o nan: los valores
+        no finitos no se grafican (matplotlib los ignora), pero la curva
+        f(x) sí se dibuja para que el usuario pueda ver visualmente por
+        qué falló. Detecta la no convergencia y agrega aviso visual.
+        """
         if not hasattr(self, 'last_function_str') or self.last_function_str is None:
             messagebox.showerror("Error", "No se encontró la función para graficar.")
             return
@@ -1964,6 +2004,8 @@ class App(tk.Tk):
             messagebox.showerror("Error", "No hay datos de iteraciones para graficar.")
             return
 
+        # Mapa de qué columna tiene la aproximación x_n para cada método.
+        # Es el mismo COLUMN_MAP de errores.py pero solo la primera componente.
         x_col_map = {
             "Bisección": 3,
             "Regla Falsa": 5,
@@ -1974,25 +2016,45 @@ class App(tk.Tk):
         }
 
         if method_name not in x_col_map:
-            messagebox.showerror("Error", f"No se ha configurado graficación para el método: {method_name}")
+            messagebox.showerror(
+                "Error",
+                f"No se ha configurado graficación para el método: {method_name}"
+            )
             return
 
         x_col = x_col_map[method_name]
 
-        try:
-            # CONVERSIÓN A FLOAT AQUÍ
-            x_aprox = [float(row[x_col]) for row in table_data]
-        except Exception:
-            messagebox.showerror("Error", "No se pudo extraer la columna de aproximaciones x_n.\nRevisa el formato de la tabla.")
-            return
+        # Extraemos la columna de aproximaciones, descartando inf/nan.
+        # Esto era el punto de fallo de la versión anterior: si la tabla
+        # tenía un inf, float() funcionaba pero las cuentas posteriores
+        # con f(inf) explotaban.
+        x_aprox = []
+        for row in table_data:
+            try:
+                v = float(row[x_col])
+                if np.isfinite(v):
+                    x_aprox.append(v)
+            except Exception:
+                continue
 
-        # Intervalo para graficar
+        # Detección de no convergencia: si la última fila de la tabla tiene
+        # error = inf, sabemos que el método no convergió. Lo usamos para
+        # cambiar el título y agregar aviso visual.
+        no_convergente = False
+        try:
+            last_err = float(table_data[-1][-1])
+            if not np.isfinite(last_err):
+                no_convergente = True
+        except Exception:
+            pass
+
+        # Decidir intervalo de graficación
         if method_name in ["Bisección", "Regla Falsa"] and \
-        hasattr(self, 'last_a') and hasattr(self, 'last_b') and \
-        self.last_a is not None and self.last_b is not None:
+                hasattr(self, 'last_a') and hasattr(self, 'last_b') and \
+                self.last_a is not None and self.last_b is not None:
             a = self.last_a
             b = self.last_b
-        else:
+        elif x_aprox:
             xmin = min(x_aprox)
             xmax = max(x_aprox)
             if xmin == xmax:
@@ -2002,33 +2064,176 @@ class App(tk.Tk):
                 margen = (xmax - xmin) * 0.4
                 a = xmin - margen
                 b = xmax + margen
+        else:
+            a, b = -2.0, 2.0  # fallback total cuando no hay datos
 
+        # Generar la curva f(x) sobre el intervalo, atrapando errores en
+        # puntos donde f no se pueda evaluar (log de negativos, etc.)
         xs = np.linspace(a, b, 400)
-        ys = [f(x) for x in xs]
+        ys = []
+        for xv in xs:
+            try:
+                ys.append(float(f(xv)))
+            except Exception:
+                ys.append(np.nan)
+        ys = np.array(ys, dtype=float)
 
+        # Crear la ventana
         win = tk.Toplevel(self)
         win.title(f"Gráfica - Método de {method_name}")
-        win.geometry("700x500")
+        win.geometry("700x520")
 
         fig, ax = plt.subplots(figsize=(6, 4))
         ax.axhline(0, color='black', linewidth=0.8)
         ax.plot(xs, ys, label='f(x)')
 
-        try:
-            ax.scatter(x_aprox, [f(x) for x in x_aprox],
-                    color='red', marker='o', label='Aproximaciones x_n')
-        except Exception:
-            pass
+        # Pintar las aproximaciones (solo las finitas)
+        if x_aprox:
+            try:
+                y_aprox = []
+                for xv in x_aprox:
+                    try:
+                        y_aprox.append(float(f(xv)))
+                    except Exception:
+                        y_aprox.append(np.nan)
+                ax.scatter(x_aprox, y_aprox, color='red', marker='o',
+                           label='Aproximaciones x_n')
+            except Exception:
+                pass
+
+        # Título con etiqueta visual de no convergencia si aplica
+        title = f'Método de {method_name}'
+        if no_convergente:
+            title += '  (NO CONVERGENTE)'
 
         ax.set_xlabel('x')
         ax.set_ylabel('f(x)')
-        ax.set_title(f'Método de {method_name}')
+        ax.set_title(title)
         ax.grid(True)
         ax.legend()
 
         canvas = FigureCanvasTkAgg(fig, master=win)
         canvas.draw()
         canvas.get_tk_widget().pack(fill='both', expand=True)
+
+        # Aviso visible cuando el método no convergió.
+        # Esto le ahorra al usuario confundirse pensando que la gráfica
+        # muestra una solución exitosa.
+        if no_convergente:
+            tk.Label(
+                win,
+                text=("El método NO convergió con los datos dados. "
+                      "Posibles causas: f(a)·f(b) ≥ 0 (no hay cambio de "
+                      "signo en el intervalo), punto inicial inadecuado, "
+                      "o g(x) no contractiva. Revisa la entrada."),
+                font=("Arial", 9), fg='#c0392b', bg='#fdecea',
+                wraplength=680, justify='left'
+            ).pack(fill='x', padx=8, pady=(0, 8))
+
+    def plot_root_errors(self, method_name, result):
+        """
+        Grafica los 4 tipos de error vs número de iteración para el método
+        ejecutado, en escala semilogarítmica:
+            E_abs   = |x_n - x_{n-1}|
+            E_rel   = |(x_n - x_{n-1}) / x_n|
+            E_rel2  = |(x_n - x_{n-1}) / x_{n-1}|
+            E_rond  = |f(x_n)|        (para Punto Fijo: |g(x_n) - x_n|)
+
+        Usa el módulo errores.py que extrae las sucesiones de la tabla y
+        calcula los 4 tipos sin re-ejecutar el método.
+        """
+        # Importamos aquí (no al inicio del archivo) para no fallar si
+        # alguien tiene una versión vieja del proyecto sin errores.py
+        try:
+            from Python.errores import compute_errors, extract_sequences, ERROR_LABELS
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"No se pudo importar el módulo de errores:\n{e}"
+            )
+            return
+
+        # Extraer la tabla del resultado. Los métodos devuelven una tupla
+        # (raíz, f(raíz), iteraciones, tabla); la tabla es el último elemento.
+        table_data = result[-1] if isinstance(result, tuple) else result
+        if not isinstance(table_data, list) or len(table_data) == 0:
+            messagebox.showerror(
+                "Error",
+                "No hay datos de iteraciones para graficar."
+            )
+            return
+
+        # Extraer sucesiones x_n y residual desde la tabla
+        try:
+            x_seq, residual_seq = extract_sequences(method_name, table_data)
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"No se pudieron extraer las sucesiones de la tabla: {e}"
+            )
+            return
+
+        # Calcular los 4 errores
+        errs = compute_errors(x_seq, residual_seq)
+        n = len(x_seq)
+        iters = np.arange(n)
+
+        # Limpieza para escala log: matplotlib ignora NaN, pero log(0) = -inf
+        # rompe el plot. Reemplazamos ceros e infinitos por NaN.
+        def clean(arr):
+            arr = np.array(arr, dtype=float)
+            arr = np.where(arr == 0, np.nan, arr)
+            arr = np.where(np.isinf(arr), np.nan, arr)
+            return arr
+
+        # Crear ventana
+        win = tk.Toplevel(self)
+        win.title(f"Gráfica de errores - {method_name}")
+        win.geometry("780x560")
+
+        fig, ax = plt.subplots(figsize=(7, 4.6))
+
+        # Las cuatro curvas. Cada una con su propio marcador para que se
+        # distingan aunque se solapen (cosa que pasa al final de la convergencia).
+        ax.semilogy(iters, clean(errs["abs"]),  marker='o', linewidth=1.5,
+                    label=ERROR_LABELS["abs"])
+        ax.semilogy(iters, clean(errs["rel"]),  marker='s', linewidth=1.5,
+                    label=ERROR_LABELS["rel"])
+        ax.semilogy(iters, clean(errs["rel2"]), marker='^', linewidth=1.5,
+                    label=ERROR_LABELS["rel2"])
+
+        # rond solo se grafica si tenemos datos. Para Punto Fijo, cambiamos
+        # la etiqueta porque ahí 'rond' significa |g(x_n) - x_n|, no |f(x_n)|.
+        if not np.all(np.isnan(errs["rond"])):
+            label_rond = ERROR_LABELS["rond"]
+            if method_name == "Punto Fijo":
+                label_rond = "E_rond = |g(xₙ) − xₙ|"
+            ax.semilogy(iters, clean(errs["rond"]), marker='d', linewidth=1.5,
+                        label=label_rond)
+
+        ax.set_xlabel("Iteración n")
+        ax.set_ylabel("Error (escala log)")
+        ax.set_title(f"Convergencia del error - {method_name}")
+        ax.grid(True, which="both", linestyle="--", alpha=0.4)
+        ax.legend(loc="best", fontsize=9)
+
+        canvas = FigureCanvasTkAgg(fig, master=win)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill='both', expand=True)
+
+        # Texto explicativo abajo: ayuda al usuario (y al profe) a leer
+        # la gráfica en términos de teoría.
+        tk.Label(
+            win,
+            text=("Escala logarítmica en y: la pendiente indica la tasa de "
+                  "convergencia. Pendiente decreciente lineal = convergencia "
+                  "lineal (bisección, punto fijo); pendiente que se duplica "
+                  "cada paso = cuadrática (Newton, raíces múltiples)."),
+            font=("Arial", 9), fg='#34495e', bg='#ecf0f1',
+            wraplength=760, justify='left'
+        ).pack(fill='x', padx=8, pady=(0, 6))
+
+
 
 if __name__ == "__main__":
     app = App()

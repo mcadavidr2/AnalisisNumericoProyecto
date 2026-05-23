@@ -1,97 +1,266 @@
+"""
+interpolacion_newton.py
+-----------------------
+Interpolación por polinomio de Newton (diferencias divididas).
+
+Replica el flujo del MATLAB del profe:
+  - Newtonint.m: construye la tabla de diferencias divididas
+  - Newtonor.m: expande el polinomio a su forma estándar
+
+Cambios respecto a la versión anterior:
+
+1. Validación delegada en _validar_y_ordenar (importada de Vandermonde),
+   mismas reglas: orden, duplicados, NaN, longitudes.
+
+2. Eliminada la rama del input() que colgaba la GUI sin argumentos.
+
+3. Eliminado código muerto después del return.
+
+4. La tabla de diferencias divididas se almacena en convención triangular
+   INFERIOR como en el MATLAB del profe. Los coeficientes b_i del
+   polinomio están en la DIAGONAL (no en la primera fila). Esto permite
+   mostrar la tabla con el mismo formato del PDF del profe (página 18).
+
+5. NUEVO: se muestra la tabla de diferencias divididas con formato
+   alineado, equivalente al de las diapositivas del profe.
+
+6. NUEVO: se muestran AMBAS formas del polinomio:
+   - Forma factorizada (canónica de Newton)
+   - Forma expandida (potencias estándar) construida con Newtonor del profe
+
+7. Firma y formato del info_dict compatibles con Vandermonde y Lagrange.
+"""
+
 import numpy as np
 import time
 import matplotlib.pyplot as plt
+
+from Python.Vandermonde import _validar_y_ordenar
 from Python.supCp3 import SUBinterpol_lagrange
-#from Python.supCp3 import SUBinterpol_newton
 from Python.supCp3 import SUBspln_cubico
 from Python.supCp3 import SUBspline_lineal
 from Python.supCp3 import Subvandermonde
 
-def interpolacion_newton(ValoresX=None, ValoresY=None, show_report=True, auto_compare=True):
-    eval_grid=500
-    # Entrada de datos si no se pasan argumentos
-    if ValoresX is None or ValoresY is None:
-        x = input("Ingrese los valores de x separados por coma: ")
-        y = input("Ingrese los valores de y separados por coma: ")
-        x = np.array([float(val) for val in x.split(",")])
-        y = np.array([float(val) for val in y.split(",")])
-    else:
-        x = np.array(ValoresX)
-        y = np.array(ValoresY)
 
-    # Validación
-    if x.ndim == 0 or len(x) < 2:
-        raise ValueError("Debe ingresar al menos dos puntos para interpolar.")
-    if not np.all(np.diff(x) > 0):
-        raise ValueError("Los valores de x deben estar en orden creciente")
-    if len(x) != len(y):
-        raise ValueError("Las listas de x e y deben tener la misma longitud.")
+def _tabla_diferencias_divididas(x, y):
+    """Construye la tabla de diferencias divididas en convención triangular
+    INFERIOR (la del MATLAB Newtonint.m del profe).
 
-    # --- Construcción del polinomio de Newton ---
+    Estructura de la tabla T (n x (n+1)):
+      T[:, 0] = x_i
+      T[:, 1] = y_i = f[x_i]
+      T[:, 2] = primeras diferencias divididas
+      T[:, 3] = segundas diferencias divididas
+      ...
+    Los coeficientes b_i del polinomio están en la DIAGONAL:
+      b_0 = T[0, 1], b_1 = T[1, 2], b_2 = T[2, 3], ...
+    """
+    n = len(x)
+    T = np.zeros((n, n + 1))
+    T[:, 0] = x
+    T[:, 1] = y
+
+    # Replica del MATLAB:
+    #   for j=3:n+1
+    #     for i=j-1:n
+    #       T(i,j) = (T(i,j-1) - T(i-1,j-1)) / (T(i,1) - T(i-j+2,1))
+    # Pasando a Python (0-indexed), j de MATLAB es j-1 aquí.
+    for j in range(2, n + 1):
+        for i in range(j - 1, n):
+            T[i, j] = (T[i, j-1] - T[i-1, j-1]) / (T[i, 0] - T[i - (j - 1), 0])
+
+    return T
+
+
+def _coeficientes_newton(T):
+    """Extrae los coeficientes b_i del polinomio de Newton desde la
+    DIAGONAL de la tabla (la convención del profe).
+    """
+    n = T.shape[0]
+    # b_i = T[i, i+1]  para i = 0, 1, ..., n-1
+    return np.array([T[i, i + 1] for i in range(n)])
+
+
+def _expandir_newton(x, b):
+    """Replica el MATLAB Newtonor.m del profe: expande el polinomio
+    de Newton desde su forma factorizada
+        p(x) = b_0 + b_1(x-x_0) + b_2(x-x_0)(x-x_1) + ...
+    a su forma estándar
+        p(x) = a_n x^n + a_{n-1} x^{n-1} + ... + a_0
+    devolviendo los coeficientes a_i en orden DESCENDENTE de potencias.
+    """
+    n = len(x)
+    # Acumulador: polinomio (x-x_0)(x-x_1)...(x-x_{i-1})
+    # Empieza siendo el polinomio constante 1.
+    acum = np.array([1.0])
+    pol = b[0] * acum.copy()
+
+    for i in range(n - 1):
+        # Equivalente a 'pol = [0 pol]' del MATLAB: agregamos coeficiente
+        # cero al inicio (sube de grado) para preparar la suma.
+        pol = np.concatenate([[0.0], pol])
+
+        # Acumular el siguiente factor (x - x_i)
+        factor = np.array([1.0, -x[i]])
+        acum = np.convolve(acum, factor)
+
+        # Sumar b_{i+1} * acum, alineando con pol al final
+        pad = len(pol) - len(acum)
+        acum_pad = np.concatenate([np.zeros(pad), acum]) if pad > 0 else acum
+        pol = pol + b[i + 1] * acum_pad
+
+    return pol
+
+
+def _formatear_tabla_diferencias(T, x, precision=4):
+    """Formatea la tabla de diferencias divididas como string alineado,
+    estilo de las diapositivas del profe (página 18).
+    """
+    n = T.shape[0]
+    headers = ["n", "x_i", "f[x_i]"]
+    for k in range(1, n):
+        if k == 1:
+            headers.append("1ra")
+        elif k == 2:
+            headers.append("2da")
+        elif k == 3:
+            headers.append("3ra")
+        else:
+            headers.append(f"{k}ta")
+
+    # Ancho de columna fijo para alineación
+    w = precision + 6
+    lineas = []
+    lineas.append(" ".join(f"{h:>{w}}" for h in headers))
+
+    for i in range(n):
+        fila = [f"{i:>{w}}"]
+        fila.append(f"{x[i]:>{w}.{precision}f}")
+        # Las columnas de diferencias: T[i, 1], T[i, 2], ..., T[i, i+1]
+        # (lo demás es triangular superior, queda vacío)
+        for j in range(1, i + 2):
+            fila.append(f"{T[i, j]:>{w}.{precision}f}")
+        # Rellenar con espacios las celdas vacías (triángulo superior)
+        for _ in range(n - 1 - i):
+            fila.append(" " * w)
+        lineas.append(" ".join(fila))
+
+    return "\n".join(lineas)
+
+
+def _formatear_polinomio(coef, var="x", precision=6):
+    """Formatea coeficientes en orden DESCENDENTE como string legible."""
+    n = len(coef)
+    grado_max = n - 1
+    partes = []
+
+    for i, c in enumerate(coef):
+        grado = grado_max - i
+        if abs(c) < 10**(-precision):
+            continue
+        signo = "+" if c >= 0 else "-"
+        valor = abs(c)
+        if grado == 0:
+            term = f"{valor:.{precision-2}g}"
+        elif grado == 1:
+            term = f"{valor:.{precision-2}g} {var}"
+        else:
+            term = f"{valor:.{precision-2}g} {var}^{grado}"
+        if not partes:
+            partes.append(term if c >= 0 else f"-{term}")
+        else:
+            partes.append(f"{signo} {term}")
+
+    if not partes:
+        return "0"
+    return " ".join(partes)
+
+
+def _formatear_polinomio_newton_factorizado(x, b, precision=4):
+    """Forma factorizada: p(x) = b_0 + b_1(x-x_0) + b_2(x-x_0)(x-x_1) + ..."""
+    partes = [f"{b[0]:.{precision}f}"]
+    factores = ""
+    for i in range(1, len(b)):
+        # Acumula el factor (x - x_{i-1})
+        factores += f"(x - {x[i-1]:g})"
+        signo = "+" if b[i] >= 0 else "-"
+        partes.append(f"{signo} {abs(b[i]):.{precision}f}{factores}")
+    return " ".join(partes)
+
+
+def interpolacion_newton(ValoresX=None, ValoresY=None,
+                          show_report=True, auto_compare=True):
+    """
+    Interpolación por polinomio de Newton con diferencias divididas.
+
+    Devuelve (resultado_str, info_dict) compatible con la GUI.
+    """
+    eval_grid = 500
+
+    # --- Validación ---
+    x, y, advertencias = _validar_y_ordenar(ValoresX, ValoresY)
+
+    # --- Cálculo ---
     start_time = time.time()
 
-    # Tabla de diferencias divididas
-    n_points = len(x)
-    F = np.zeros((n_points, n_points))
-    F[:, 0] = y  # Primera columna son las y_i
+    # Paso 1: construir la tabla de diferencias divididas (Newtonint del profe)
+    T = _tabla_diferencias_divididas(x, y)
 
-    for j in range(1, n_points):
-        for i in range(n_points - j):
-            F[i, j] = (F[i + 1, j - 1] - F[i, j - 1]) / (x[i + j] - x[i])
+    # Paso 2: extraer los coeficientes b_i (la diagonal de la tabla)
+    b = _coeficientes_newton(T)
 
-    # Coeficientes del polinomio (primera fila de F)
-    a = F[0, :]
-
-    # --- Formatear el polinomio como string ---
-    polinomio = f"P(x) = {a[0]:.4f}"
-    termino = ""
-    for i in range(1, n_points):
-        termino += f"(x - {x[i-1]:.4f})"
-        polinomio += f" + {a[i]:.4f}{termino}"
+    # Paso 3: expandir a forma estándar (Newtonor del profe)
+    coef_expandidos = _expandir_newton(x, b)
+    poly_obj = np.poly1d(coef_expandidos)
 
     end_time = time.time()
     tiempo_ejecucion = end_time - start_time
 
-    # --- Evaluar el polinomio (para gráfica) ---
-    def P_newton(x_eval):
-        result = a[-1]
-        for i in range(len(a) - 2, -1, -1):
-            result = result * (x_eval - x[i]) + a[i]
-        return result
+    # --- Strings para mostrar ---
+    tabla_str = _formatear_tabla_diferencias(T, x)
+    forma_factorizada = _formatear_polinomio_newton_factorizado(x, b)
+    forma_expandida = _formatear_polinomio(coef_expandidos)
 
-    x_plot = np.linspace(min(x), max(x), 100)
-    y_newton = [P_newton(xi) for xi in x_plot]
+    # --- Gráfica ---
+    x_plot = np.linspace(min(x), max(x), 500)
+    y_newton = np.polyval(coef_expandidos, x_plot)
 
+    # --- Resultado para la GUI ---
+    puntos_fmt = ", ".join(f"({xi:g}, {yi:g})" for xi, yi in zip(x, y))
     resultado = (
-        f"Puntos ingresados: {list(zip(ValoresX,ValoresY))}\n"
-        f"Polinomio de Newton:\n{polinomio}\n\n"
+        f"Puntos ingresados (ordenados): {puntos_fmt}\n\n"
+        f"Tabla de diferencias divididas:\n"
+        f"{tabla_str}\n\n"
+        f"Coeficientes b_i (diagonal de la tabla):\n  {b}\n\n"
+        f"Forma factorizada de Newton:\n  P(x) = {forma_factorizada}\n\n"
+        f"Polinomio expandido:\n  P(x) = {forma_expandida}\n\n"
         f"Tiempo de ejecución: {tiempo_ejecucion:.6f} segundos"
     )
+    if advertencias:
+        resultado += "\n\nAdvertencias:\n" + "\n".join(f"- {a}" for a in advertencias)
 
     info = {
         "tiempo": tiempo_ejecucion,
-        "coeficientes": a.tolist(),
-        "polinomio_str": polinomio,
-        "polinomio_obj": None,
+        "coeficientes": coef_expandidos.tolist(),
+        "coeficientes_newton": b.tolist(),
+        "tabla_diferencias": T.tolist(),
+        "polinomio_str": forma_expandida,
+        "polinomio_factorizado": forma_factorizada,
+        "polinomio_obj": poly_obj,
         "polinomios_base": None,
         "polinomios_por_tramo": None,
         "n_tramos": None,
         "condicion": None,
+        "advertencias": advertencias,
     }
 
-    # Construir objeto polinomio estándar para inspección (coeficientes en base monómica)
-    try:
-        coeffs = np.polyfit(x, y, len(x) - 1)
-        poly_obj = np.poly1d(coeffs)
-        info['polinomio_obj'] = poly_obj
-        info['coeficientes'] = coeffs.tolist()
-    except Exception:
-        # si falla, dejar polinomio_obj como None
-        pass
-
+    # --- Gráfica del informe ---
     if show_report:
         try:
-            fig, (ax_plot, ax_table) = plt.subplots(ncols=2, figsize=(12,6), gridspec_kw={'width_ratios':[3,2]})
+            fig, (ax_plot, ax_table) = plt.subplots(
+                ncols=2, figsize=(12, 6),
+                gridspec_kw={'width_ratios': [3, 2]}
+            )
             ax_plot.plot(x, y, 'ro', label='Puntos dados')
             ax_plot.plot(x_plot, y_newton, 'b-', label='Polinomio de Newton')
             ax_plot.set_title("Interpolación de Newton")
@@ -103,48 +272,47 @@ def interpolacion_newton(ValoresX=None, ValoresY=None, show_report=True, auto_co
             rows = [
                 ["Tiempo (s)", f"{tiempo_ejecucion:.6f}"],
                 ["Grado", f"{len(x)-1}"],
-                ["Polinomio (trunc)", polinomio[:120] + ("..." if len(polinomio)>120 else "")]
+                ["Polinomio (trunc)",
+                 forma_expandida[:120] +
+                 ("..." if len(forma_expandida) > 120 else "")],
             ]
-            col_labels = ["Propiedad","Valor"]
             ax_table.axis('off')
-            table = ax_table.table(cellText=rows, colLabels=col_labels, loc='center')
+            table = ax_table.table(
+                cellText=rows, colLabels=["Propiedad", "Valor"],
+                loc='center'
+            )
             table.auto_set_font_size(False)
             table.set_fontsize(9)
-            table.scale(1,2)
+            table.scale(1, 2)
+            plt.tight_layout()
 
-            # polinomio completo en figura adicional
-            fig_pol = plt.figure(figsize=(10,2))
+            # Figura adicional con la tabla de diferencias divididas
+            fig_tab = plt.figure(figsize=(10, 1 + 0.4 * len(x)))
             plt.axis('off')
-            plt.text(0.01, 0.5, polinomio, va='center', family='monospace', fontsize=9)
+            plt.text(0.01, 0.99, tabla_str, va='top',
+                     family='monospace', fontsize=9)
             plt.tight_layout()
             plt.show()
         except Exception:
             pass
 
-    # Comparación automática: llamar a los otros métodos del paquete supCp3
+    # --- Comparación automática (mismo patrón que Lagrange) ---
     if auto_compare:
         try:
             eval_pts = np.linspace(min(x), max(x), max(100, int(eval_grid)))
-            # referencia: Newton (método actual)
-            y_ref = np.array([P_newton(xi) for xi in eval_pts])
+            y_ref = np.polyval(coef_expandidos, eval_pts)
 
             other_results = {}
-            try:
-                other_results['Lagrange'] = SUBinterpol_lagrange.interpol_lagrange(x, y)
-            except Exception:
-                other_results['Lagrange'] = None
-            try:
-                other_results['Spline_lineal'] = SUBspline_lineal.SUBSUBspline_lineal(x, y)
-            except Exception:
-                other_results['Spline_lineal'] = None
-            try:
-                other_results['Spline_cubico'] = SUBspln_cubico.SUBSUBspline_cubico(x, y)
-            except Exception:
-                other_results['Spline_cubico'] = None
-            try:
-                other_results['Vandermonde'] = Subvandermonde.interpol_vandermonde(x, y)
-            except Exception:
-                other_results['Vandermonde'] = None
+            for name, fn in [
+                ("Lagrange", lambda: SUBinterpol_lagrange.interpol_lagrange(x, y)),
+                ("Spline_lineal", lambda: SUBspline_lineal.SUBSUBspline_lineal(x, y)),
+                ("Spline_cubico", lambda: SUBspln_cubico.SUBSUBspline_cubico(x, y)),
+                ("Vandermonde", lambda: Subvandermonde.interpol_vandermonde(x, y)),
+            ]:
+                try:
+                    other_results[name] = fn()
+                except Exception:
+                    other_results[name] = None
 
             def reeval_on_common(res):
                 if res is None:
@@ -160,34 +328,51 @@ def interpolacion_newton(ValoresX=None, ValoresY=None, show_report=True, auto_co
                     metrics[name] = {'max_err': None, 'rmse': None}
                 else:
                     diff = y_ref - y_cmp
-                    metrics[name] = {'max_err': float(np.max(np.abs(diff))), 'rmse': float(np.sqrt(np.mean(diff**2)))}
+                    metrics[name] = {
+                        'max_err': float(np.max(np.abs(diff))),
+                        'rmse': float(np.sqrt(np.mean(diff**2))),
+                    }
 
             if show_report:
                 try:
-                    fig, (ax_plot, ax_table) = plt.subplots(ncols=2, figsize=(12,5), gridspec_kw={'width_ratios':[3,2]})
+                    fig, (ax_plot, ax_table) = plt.subplots(
+                        ncols=2, figsize=(12, 5),
+                        gridspec_kw={'width_ratios': [3, 2]}
+                    )
                     ax_plot.plot(x, y, 'ro', label='Puntos dados')
                     ax_plot.plot(eval_pts, y_ref, 'k-', label='Newton (referencia)')
-                    colors = {'Lagrange':'m--','Spline_lineal':'g--','Spline_cubico':'y--'}
+                    colors = {'Lagrange': 'm--', 'Spline_lineal': 'g--',
+                              'Spline_cubico': 'y--', 'Vandermonde': 'b:'}
                     for name, res in other_results.items():
                         ycmp = reeval_on_common(res)
                         if ycmp is not None:
-                            ax_plot.plot(eval_pts, ycmp, colors.get(name,'--'), label=name)
+                            ax_plot.plot(eval_pts, ycmp,
+                                         colors.get(name, '--'), label=name)
                     ax_plot.set_title('Comparación respecto a Newton')
                     ax_plot.set_xlabel('x')
                     ax_plot.set_ylabel('y')
                     ax_plot.legend()
                     ax_plot.grid()
 
-                    col_labels = ['Método','Max err','RMSE']
                     rows = []
-                    for name in ['Lagrange','Spline_lineal','Spline_cubico','vandermonde']:
+                    for name in ['Lagrange', 'Spline_lineal',
+                                 'Spline_cubico', 'Vandermonde']:
                         m = metrics.get(name, {})
-                        rows.append([name, f"{m['max_err']:.6g}" if m['max_err'] is not None else 'N/A', f"{m['rmse']:.6g}" if m['rmse'] is not None else 'N/A'])
+                        max_err = m.get('max_err')
+                        rmse = m.get('rmse')
+                        rows.append([
+                            name,
+                            f"{max_err:.6g}" if max_err is not None else 'N/A',
+                            f"{rmse:.6g}" if rmse is not None else 'N/A',
+                        ])
                     ax_table.axis('off')
-                    table = ax_table.table(cellText=rows, colLabels=col_labels, loc='center')
+                    table = ax_table.table(
+                        cellText=rows, colLabels=['Método', 'Max err', 'RMSE'],
+                        loc='center'
+                    )
                     table.auto_set_font_size(False)
                     table.set_fontsize(9)
-                    table.scale(1,2)
+                    table.scale(1, 2)
                     plt.tight_layout()
                     plt.show()
                 except Exception:
@@ -197,28 +382,13 @@ def interpolacion_newton(ValoresX=None, ValoresY=None, show_report=True, auto_co
 
     return resultado, info
 
-    # Comparación con otros métodos (opcional)
-    comparar = input("\n¿Desea comparar con otros métodos? (s/n): ").strip().lower()
-    if comparar == 's':
-        ILG = SUBinterpol_lagrange.interpol_lagrange(x, y)
-        SPCC = SUBspln_cubico.SUBSUBspline_cubico(x, y)
-        SPL = SUBspline_lineal.SUBSUBspline_lineal(x, y)
-        VAN = Subvandermonde.interpol_vandermonde(x, y)
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(x, y, 'ro', label='Puntos dados')
-        plt.plot(x_plot, y_newton, 'b-', label='Newton')
-        plt.plot(SPL[0], SPL[1], 'g--', label='Spline lineal')
-        plt.plot(ILG[0], ILG[1], 'm--', label='Lagrange')
-        plt.plot(VAN[0], VAN[1], 'k-', label='Vandermonde')
-        plt.plot(SPCC[0], SPCC[1], 'y--', label='Spline Cúbico')
-        plt.title("Comparación General")
-        plt.xlabel("x")
-        plt.ylabel("y")
-        plt.legend()
-        plt.grid()
-        plt.show(block=False)
-        resultado += "\nComparación general mostrada en la gráfica."
 
 if __name__ == "__main__":
-    print(interpolacion_newton())
+    # Caso del PDF del profe (página 7-9): debe dar el polinomio
+    # p(x) = 0.4124 x^3 + 0.9394 x^2 - 5.836 x + 0.0047
+    res, info = interpolacion_newton(
+        [-2, -1, 2, 3],
+        [12.13533528, 6.367879441, -4.610943901, 2.085536923],
+        show_report=False, auto_compare=False
+    )
+    print(res)
